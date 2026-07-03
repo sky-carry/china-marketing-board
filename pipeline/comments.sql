@@ -41,6 +41,13 @@ COMMENT ON COLUMN ad_daily.real_pay_amount  IS '真实成交金额（元）';
 COMMENT ON COLUMN ad_daily.real_orders      IS '真实成交订单数';
 COMMENT ON COLUMN ad_daily.real_roi         IS '真实成交ROI';
 COMMENT ON COLUMN ad_daily.refund_rate      IS '退款率（%）';
+-- 直投归因指标（小飞机=直推 / 沸点=直接 / 微橙=单品 / 麦斯=主投品）：下单(gross) 与 成交(net) 两组
+COMMENT ON COLUMN ad_daily.direct_orders         IS '直投下单量（直推付款订单数/直接原始订单量/单品订单数/主投品下单量）';
+COMMENT ON COLUMN ad_daily.direct_pay_amount     IS '直投下单金额（元）';
+COMMENT ON COLUMN ad_daily.direct_roi            IS '直投下单ROI';
+COMMENT ON COLUMN ad_daily.direct_real_orders    IS '直投成交量（真实直推付款订单数/直接有效下单量/单品下单订单数/主投品成交量）';
+COMMENT ON COLUMN ad_daily.direct_real_pay_amount IS '直投成交金额（元）';
+COMMENT ON COLUMN ad_daily.direct_real_roi       IS '直投成交ROI';
 COMMENT ON COLUMN ad_daily.fetched_at       IS '抓取入库时间';
 
 -- ============================ crawl_progress 抓取进度（幂等去重） ============================

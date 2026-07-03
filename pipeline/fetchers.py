@@ -8,7 +8,9 @@ UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like 
 
 DBCOLS = ["platform","login_account","level","date","entity_id","entity_name","account_id","account_name",
  "parent_id","parent_name","channel","cost","impressions","clicks","ctr","cpm","cpc","conversions",
- "conversion_cost","orders","pay_amount","roi","real_pay_amount","real_orders","real_roi","refund_rate"]
+ "conversion_cost","orders","pay_amount","roi","real_pay_amount","real_orders","real_roi","refund_rate",
+ # 直投归因（小飞机=直推 / 沸点=直接 / 微橙=单品 / 麦斯=主投品）：下单(gross) 与 成交(net) 两组
+ "direct_orders","direct_pay_amount","direct_roi","direct_real_orders","direct_real_pay_amount","direct_real_roi"]
 
 def _num(v):
     try: return float(str(v).replace(",","")) if v is not None and v!="" else None
@@ -31,9 +33,9 @@ def load_logins(enabled_only=True):
     try:
         import psycopg2
         conn=psycopg2.connect(DSN); cur=conn.cursor()
-        q="SELECT platform,tag,auth FROM accounts"+(" WHERE enabled" if enabled_only else "")+" ORDER BY platform,tag"
+        q="SELECT platform,tag,auth,id FROM accounts"+(" WHERE enabled" if enabled_only else "")+" ORDER BY platform,tag"
         cur.execute(q)
-        rows=[{"platform":r[0],"tag":r[1],"auth":dict(r[2])} for r in cur.fetchall()]
+        rows=[{"platform":r[0],"tag":r[1],"auth":dict(r[2]),"id":r[3]} for r in cur.fetchall()]
         conn.close()
         if rows: return rows
     except Exception:
@@ -52,13 +54,13 @@ XFJ_MET=['impressions','adx_metric_0','click_rate','cpm','cpc','adx_metric_7','c
  'cid_trans_direct_roi','cid_trans_direct_real_roi','cid_refund_rate']
 XFJ_LEVELS={
  "推广账号":{"uri":"v1/account/list","_type":"ACCOUNT_REPORT","extra":{"WithFavorite":True,"needAdveringProp":False},
-   "id":["account_id","_id"],"name":["Name"],"acc_id":["account_id","_id"],"acc_name":["Name"],"par_id":[],"par_name":[],"ext3":["ExternalId"]},
+   "id":["ExternalId","account_id","_id"],"name":["Name"],"acc_id":["ExternalId","account_id","_id"],"acc_name":["Name"],"par_id":[],"par_name":[],"ext3":["ExternalId"]},
  "广告组":{"uri":"v1/plan/list","_type":"PLAN_REPORT","extra":{"OnlySubmitSuccess":False,"AccountId":"","PlanId":"","CampaignId":"","AdxSubIds":[]},
-   "id":["plan_id","_id"],"name":["Name"],"acc_id":["AccountId"],"acc_name":["AccountName"],"par_id":["AccountId"],"par_name":["AccountName"],"ext3":["AccountExternalId","ExternalId"]},
+   "id":["plan_id","_id"],"name":["Name"],"acc_id":["AccountExternalId","AccountId"],"acc_name":["AccountName"],"par_id":["AccountExternalId","AccountId"],"par_name":["AccountName"],"ext3":["AccountExternalId","ExternalId"]},
  "广告":{"uri":"v1/campaign/list","_type":"CAMPAIGN_REPORT","extra":{"OnlySubmitSuccess":False,"WithCidLevel":False,"AccountId":"","PlanId":"","CampaignId":"","AdxSubIds":[],"AdxSubId":""},
-   "id":["campaign_id","_id"],"name":["Name"],"acc_id":["AccountId"],"acc_name":["AccountName"],"par_id":["PlanId"],"par_name":["PlanName"],"ext3":["ExternalId"]},
+   "id":["campaign_id","_id"],"name":["Name"],"acc_id":["AccountExternalId","AccountId"],"acc_name":["AccountName"],"par_id":["PlanId"],"par_name":["PlanName"],"ext3":["ExternalId"]},
  "创意":{"uri":"v1/creative/list","_type":"CREATIVE_REPORT","extra":{"WithMaterial":True,"OnlySubmitSuccess":False,"AccountId":"","PlanId":"","CampaignId":"","AdxSubIds":[]},
-   "id":["creative_id","_id"],"name":["Name","Title","title"],"acc_id":["AccountId"],"acc_name":["AccountName"],"par_id":["campaign_id","CampaignId"],"par_name":["CampaignName"],"ext3":["ExternalId"]},
+   "id":["creative_id","_id"],"name":["Name","Title","title"],"acc_id":["AccountExternalId","AccountId"],"acc_name":["AccountName"],"par_id":["campaign_id","CampaignId"],"par_name":["CampaignName"],"ext3":["ExternalId"]},
 }
 def _ts(day,end=False):
     mid=(datetime.datetime(day.year,day.month,day.day)-datetime.datetime(1970,1,1)).total_seconds()
@@ -72,26 +74,33 @@ def _first(it,keys):
     return None
 def fetch_xfj(login,level,day):
     a=login["auth"]; cfg=XFJ_LEVELS[level]; M=1e6
-    cookie=f'lang=zhCN; td.token={a["token"]}; td-op-uid={a["op_uid"]}; td.sid={a["sid"]}'
-    hdr={'authorization':'Bearer '+a["token"],'content-type':'application/json; charset=UTF-8','cookie':cookie,
-         'td-op-uid':a["op_uid"],'td-product':'td','x-requested-with':'XMLHttpRequest','accept-encoding':'identity','user-agent':UA}
-    items=[]; page=1
-    while True:
-        data={'begindate':_ts(day),'enddate':_ts(day,True),'page':page,'limit':200,'metrics':XFJ_MET,
-              'order':'cost|-1','WithLevel':True,'WithCidConvertCfg':True,'_type':cfg["_type"]}
-        data.update(cfg["extra"])
-        body=json.dumps({'type':'message','mid':page,'req':1,'uri':cfg["uri"],'__uid_4_track':int(a["op_uid"]),
-              'td-op-uid':a["op_uid"],'source':'td.web','version':'1782784101','hash':'#serving','data':data}).encode()
-        req=urllib.request.Request('https://td.smallfighter.com/'+cfg["uri"],data=body,headers=hdr,method='POST')
-        d=json.loads(urllib.request.urlopen(req,timeout=60).read())['data']
-        items+=d.get('items') or []
-        if len(items)>=d.get('total',0) or not d.get('items'): break
-        page+=1; time.sleep(0.1)
+    # 一个小飞机登录可挂多个「项目」，op_uid 即项目 ID；op_uids 有值则逐项目抓，否则退回单个 op_uid
+    op_uids=[str(x) for x in (a.get("op_uids") or [a["op_uid"]])]
+    items=[]
+    for op_uid in op_uids:
+        cookie=f'lang=zhCN; td.token={a["token"]}; td-op-uid={op_uid}; td.sid={a["sid"]}'
+        hdr={'authorization':'Bearer '+a["token"],'content-type':'application/json; charset=UTF-8','cookie':cookie,
+             'td-op-uid':op_uid,'td-product':'td','x-requested-with':'XMLHttpRequest','accept-encoding':'identity','user-agent':UA}
+        got=[]; page=1                                  # got: 本项目累计；每个 op_uid 独立翻页
+        while True:
+            data={'begindate':_ts(day),'enddate':_ts(day,True),'page':page,'limit':200,'metrics':XFJ_MET,
+                  'order':'cost|-1','WithLevel':True,'WithCidConvertCfg':True,'_type':cfg["_type"]}
+            data.update(cfg["extra"])
+            body=json.dumps({'type':'message','mid':page,'req':1,'uri':cfg["uri"],'__uid_4_track':int(op_uid),
+                  'td-op-uid':op_uid,'source':'td.web','version':'1782784101','hash':'#serving','data':data}).encode()
+            req=urllib.request.Request('https://td.smallfighter.com/'+cfg["uri"],data=body,headers=hdr,method='POST')
+            d=json.loads(urllib.request.urlopen(req,timeout=60).read())['data']
+            page_items=d.get('items') or []
+            got+=page_items
+            if len(got)>=d.get('total',0) or not page_items: break
+            page+=1; time.sleep(0.1)
+        items+=got
     out=[]
     for it in items:
         cost=_num(it.get('cost'))
         if not cost: continue
         cost/=M; pay=(_num(it.get('cid_trans_payment_amount')) or 0)/M; rpay=(_num(it.get('cid_trans_real_payment_amount')) or 0)/M
+        dpay=(_num(it.get('adx_metric_326')) or 0)/M; drpay=(_num(it.get('cid_trans_direct_real_payment_amount')) or 0)/M
         out.append({"entity_id":str(_first(it,cfg["id"])),"entity_name":_first(it,cfg["name"]),
             "account_id":str(_first(it,cfg["acc_id"]) or ""),"account_name":_first(it,cfg["acc_name"]),
             "parent_id":str(_first(it,cfg["par_id"]) or "") or None,"parent_name":_first(it,cfg["par_name"]),
@@ -101,7 +110,9 @@ def fetch_xfj(login,level,day):
             "conversions":_i(it.get('adx_metric_7')),"conversion_cost":_r((_num(it.get('convert_cost')) or 0)/M),
             "orders":_i(it.get('cid_trans_order_num')),"pay_amount":round(pay,2),"roi":_div(pay,cost),
             "real_pay_amount":round(rpay,2),"real_orders":_i(it.get('cid_trans_real_order_num')),"real_roi":_div(rpay,cost),
-            "refund_rate":_r((_num(it.get('cid_refund_rate')) or 0)/100)})
+            "refund_rate":_r((_num(it.get('cid_refund_rate')) or 0)/100),
+            "direct_orders":_i(it.get('adx_metric_323')),"direct_pay_amount":round(dpay,2),"direct_roi":_div(dpay,cost),
+            "direct_real_orders":_i(it.get('cid_trans_direct_real_order_num')),"direct_real_pay_amount":round(drpay,2),"direct_real_roi":_div(drpay,cost)})
     return out
 
 # ============================ 沸点 ============================
@@ -135,14 +146,17 @@ def fetch_fd(login,level,day):
             "conversions":_i(it.get('convertCount')),"conversion_cost":_div(cost,conv),
             "orders":_i(it.get('originOrderCount')),"pay_amount":_r((_num(it.get('originOrderAmount')) or 0)/H),"roi":_r((_num(it.get('originOrderRoi')) or 0)/H),
             "real_pay_amount":_r((_num(it.get('orderAmount')) or 0)/H),"real_orders":_i(it.get('orderCount')),"real_roi":_r((_num(it.get('orderRoi')) or 0)/H),
-            "refund_rate":_r((_num(it.get('refundOrderRate')) or 0)/H)})
+            "refund_rate":_r((_num(it.get('refundOrderRate')) or 0)/H),
+            "direct_orders":_i(it.get('directOriginOrderCount')),"direct_pay_amount":_r((_num(it.get('directOriginOrderAmount')) or 0)/H),"direct_roi":_r((_num(it.get('directOriginOrderRoi')) or 0)/H),
+            "direct_real_orders":_i(it.get('directOrderCount')),"direct_real_pay_amount":_r((_num(it.get('directOrderAmount')) or 0)/H),"direct_real_roi":_r((_num(it.get('directOrderRoi')) or 0)/H)})
     return out
 
 # ============================ 微橙 ============================
 WC_LEVELS={"账户":"SecondAccountData/businessFindsDev","计划":"PlanData/businessFindsDev","素材":"MaterialData/findsDev"}
-WC_IDNAME={"账户":(["second_account_id","advertiser_id"],["name"],[],[]),
+WC_IDNAME={"账户":(["advertiser_id"],["advertiser_name"],[],[]),
  "计划":(["promotion_id","project_id"],["promotion_name","project_name"],["project_id"],["project_name"]),
  "素材":(["material_id"],["material_name"],["promotion_id","project_id"],["promotion_name","project_name"])}
+_WC_NAME={}  # advertiser_id -> advertiser_name（抓账户级时填充，供深层维度补账户名）
 def fetch_wc(login,level,day):
     a=login["auth"]; ep=WC_LEVELS[level]
     hdr={"content-type":"application/x-www-form-urlencoded","accept":"application/json, text/plain, */*",
@@ -160,15 +174,21 @@ def fetch_wc(login,level,day):
     for it in items:
         cost=_num(it.get('scost'))
         if not cost: continue
+        adv_id=_first(it,["advertiser_id"]); adv_name=_first(it,["advertiser_name"])
+        if level=="账户" and adv_id and adv_name:      # 账户级顺带缓存账户名，供深层补名
+            _WC_NAME[str(adv_id)]=adv_name
+        acc_name=adv_name or _WC_NAME.get(str(adv_id))  # 深层接口不返回账户名，查缓存
         out.append({"entity_id":str(_first(it,idk)),"entity_name":_first(it,namek),
-            "account_id":str(_first(it,["second_account_id","advertiser_id"]) or ""),"account_name":_first(it,["name","advertiser_name"]),
+            "account_id":str(adv_id or ""),"account_name":acc_name,
             "parent_id":str(_first(it,pidk) or "") or None,"parent_name":_first(it,pnamek),"channel":"巨量引擎",
             "cost":_r(cost),"impressions":_i(it.get('sshow')),"clicks":_i(it.get('sclick')),
             "ctr":_r(it.get('sctr')),"cpm":_r(it.get('cpm_platform')),"cpc":_r(it.get('cpc_platform')),
             "conversions":_i(it.get('sconvert')),"conversion_cost":_r(it.get('sconvert_cost')),
             "orders":_i(it.get('sall_alipay_count')),"pay_amount":_r(it.get('sall_alipay_total_price')),"roi":_r(it.get('ROI_all')),
             "real_pay_amount":_r(it.get('salipay_total_price')),"real_orders":_i(it.get('salipay_count')),"real_roi":_r(it.get('ROI')),
-            "refund_rate":_r(it.get('refund_rate'))})
+            "refund_rate":_r(it.get('refund_rate')),
+            "direct_orders":_i(it.get('sall_single_count')),"direct_pay_amount":_r(it.get('sall_single_total_price')),"direct_roi":_r(it.get('ROI_all_single')),
+            "direct_real_orders":_i(it.get('ssingle_count')),"direct_real_pay_amount":_r(it.get('ssingle_total_price')),"direct_real_roi":_r(it.get('ROI_single'))})
     return out
 
 # ============================ 麦斯 ============================
@@ -211,7 +231,9 @@ def fetch_ms(login,level,day):
             "conversions":_i(conv),"conversion_cost":_r(ccost if ccost is not None else (costs/conv if conv else None)),
             "orders":_i(it.get('all_no')),"pay_amount":_r(allgmv),"roi":_r(it.get('gmv_roi')),
             "real_pay_amount":_r(it.get('all_gsv')),"real_orders":_i(it.get('all_gsv_no')),"real_roi":_r(it.get('gsv_roi')),
-            "refund_rate":_r(refund/allgmv*100 if allgmv else None)})
+            "refund_rate":_r(refund/allgmv*100 if allgmv else None),
+            "direct_orders":_i(it.get('direct_all_no')),"direct_pay_amount":_r(it.get('direct_all_gmv')),"direct_roi":_r(it.get('direct_gmv_roi')),
+            "direct_real_orders":_i(it.get('direct_all_gsv_no')),"direct_real_pay_amount":_r(it.get('direct_all_gsv')),"direct_real_roi":_r(it.get('direct_gsv_roi'))})
     return out
 
 FETCH={"小飞机":fetch_xfj,"沸点":fetch_fd,"微橙":fetch_wc,"麦斯":fetch_ms}

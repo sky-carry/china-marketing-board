@@ -1,12 +1,24 @@
 * { box-sizing: border-box; }
 html, body, #app { margin: 0; height: 100%; }
-body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; background: #f4f6fa; color: #303133; }
-.page { padding: 16px 20px; }
-.kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 14px; }
+body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; background: #f4f6fa; color: #303133; overflow: hidden; }
+
+/* 页面：填满内容区、纵向 flex、外层不出现滚动条 */
+.page { padding: 16px 20px; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+.page.page-scroll { overflow: auto; }          /* 需要整体滚动的页面（少用） */
+
+.kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 14px; flex: none; }
 .kpi { background: #fff; border: 1px solid #ebeef5; border-radius: 10px; padding: 14px 16px; }
 .kpi .t { font-size: 12px; color: #909399; }
 .kpi .v { font-size: 22px; font-weight: 700; margin-top: 4px; color: #303133; }
-.card { background: #fff; border: 1px solid #ebeef5; border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
+
+.card { background: #fff; border: 1px solid #ebeef5; border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; flex: none; }
+/* 需要填满剩余高度的卡片（通常是表格/图表卡片） */
+.card.grow { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; margin-bottom: 0; }
+.card.grow .table-wrap { flex: 1 1 auto; min-height: 0; }
+.card.grow .chart-fill { flex: 1 1 auto; min-height: 0; }
+
+.pager { display: flex; justify-content: flex-end; margin-top: 10px; flex: none; }
+
 .controls { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-end; }
 .controls .lbl { font-size: 12px; color: #909399; margin-bottom: 4px; }
 @media (max-width: 900px) { .kpis { grid-template-columns: repeat(2, 1fr); } }

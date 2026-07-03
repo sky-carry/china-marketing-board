@@ -32,7 +32,8 @@
           <div class="lbl">分组</div>
           <el-radio-group v-model="sel.group" size="small" @change="loadTrend">
             <el-radio-button value="platform">按平台</el-radio-button>
-            <el-radio-button value="account">按账户Top10</el-radio-button>
+            <el-radio-button value="login">按登录账号</el-radio-button>
+            <el-radio-button value="account">按投放账户Top10</el-radio-button>
             <el-radio-button value="total">总计</el-radio-button>
           </el-radio-group>
         </div>
@@ -46,15 +47,15 @@
 
     <div class="kpis">
       <div class="kpi"><div class="t">总消费</div><div class="v">¥{{ fmt(kpi.cost) }}</div></div>
-      <div class="kpi"><div class="t">真实付款(GMV)</div><div class="v">¥{{ fmt(kpi.real_pay_amount) }}</div></div>
+      <div class="kpi"><div class="t">真实付款(GSV)</div><div class="v">¥{{ fmt(kpi.real_pay_amount) }}</div></div>
       <div class="kpi"><div class="t">整体真实ROI</div><div class="v">{{ kpi.real_roi ?? '-' }}</div></div>
       <div class="kpi"><div class="t">真实订单数</div><div class="v">{{ fmt(kpi.real_orders) }}</div></div>
       <div class="kpi"><div class="t">加权退款率</div><div class="v">{{ kpi.refund_rate ?? '-' }}%</div></div>
     </div>
 
-    <div class="card">
-      <div style="font-weight:600;margin-bottom:8px">{{ trendLabel }} · 趋势</div>
-      <div ref="chartEl" style="height:440px"></div>
+    <div class="card grow">
+      <div style="font-weight:600;margin-bottom:8px;flex:none">{{ trendLabel }} · 趋势</div>
+      <div ref="chartEl" class="chart-fill" style="min-height:260px"></div>
     </div>
   </div>
 </template>
@@ -129,11 +130,18 @@ async function loadTrend() {
 }
 async function reload() { await Promise.all([loadKpi(), loadTrend()]) }
 
+let ro = null
+const onResize = () => chart && chart.resize()
 onMounted(async () => {
   chart = echarts.init(chartEl.value)
-  window.addEventListener('resize', () => chart.resize())
+  window.addEventListener('resize', onResize)
+  ro = new ResizeObserver(onResize); ro.observe(chartEl.value)   // 跟随 flex 高度变化自适应
   await loadMeta()
   await reload()
 })
-onBeforeUnmount(() => chart && chart.dispose())
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', onResize)
+  if (ro) ro.disconnect()
+  chart && chart.dispose()
+})
 </script>

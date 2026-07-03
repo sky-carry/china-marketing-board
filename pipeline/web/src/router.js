@@ -1,5 +1,7 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import Dashboard from './views/Dashboard.vue'
+import AccountBoard from './views/AccountBoard.vue'
+import PlatformDetail from './views/PlatformDetail.vue'
 import Accounts from './views/Accounts.vue'
 import Tasks from './views/Tasks.vue'
 
@@ -8,6 +10,8 @@ export default createRouter({
   routes: [
     { path: '/', redirect: '/dashboard' },
     { path: '/dashboard', component: Dashboard, meta: { title: '数据看板' } },
+    { path: '/account-board', component: AccountBoard, meta: { title: '账户看板' } },
+    { path: '/platform/:name', component: PlatformDetail, meta: { title: '平台明细' } },
     { path: '/accounts', component: Accounts, meta: { title: '账号管理' } },
     { path: '/tasks', component: Tasks, meta: { title: '定时任务' } },
   ]
