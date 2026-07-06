@@ -11,7 +11,8 @@ FROM python:3.12-slim
 WORKDIR /app
 ENV PYTHONUNBUFFERED=1 TZ=Asia/Shanghai
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# 国内服务器直连 pypi.org 极慢，使用清华镜像加速
+RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple --timeout 60 -r requirements.txt
 # 后端代码
 COPY *.py ./
 # 前端构建产物（app.py 从 web/dist 托管）
