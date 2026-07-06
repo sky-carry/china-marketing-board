@@ -70,13 +70,14 @@ def grab(platform, tag):
 def main():
     aid=int(sys.argv[1])
     c=psycopg2.connect(DSN); c.autocommit=True; cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("SELECT platform,tag FROM accounts WHERE id=%s",(aid,)); row=cur.fetchone()
+    cur.execute("SELECT platform,tag,auth FROM accounts WHERE id=%s",(aid,)); row=cur.fetchone()
     if not row: print("account not found"); sys.exit(1)
     auth=grab(row["platform"], row["tag"])
     if not auth:
         print("FAIL 未取到凭证"); sys.exit(2)
+    merged={**dict(row.get("auth") or {}), **auth}   # 合并：保留 op_uids 等字段，不覆盖
     cur.execute("UPDATE accounts SET auth=%s, token_status='ok', token_updated_at=now() WHERE id=%s",
-        (psycopg2.extras.Json(auth), aid))
+        (psycopg2.extras.Json(merged), aid))
     print("OK 已更新凭证:", list(auth.keys())); c.close()
 
 if __name__=="__main__":
