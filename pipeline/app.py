@@ -44,6 +44,12 @@ METRICS={
  "orders":("订单数","SUM(orders)"),
  "real_orders":("真实订单数","SUM(real_orders)"),
  "refund_rate":("退款率(%)","SUM(refund_rate*cost)/NULLIF(SUM(cost),0)"),
+ "direct_pay_amount":("直投下单金额(元)","SUM(direct_pay_amount)"),
+ "direct_real_pay_amount":("直投成交金额(元)","SUM(direct_real_pay_amount)"),
+ "direct_orders":("直投下单量","SUM(direct_orders)"),
+ "direct_real_orders":("直投成交量","SUM(direct_real_orders)"),
+ "direct_roi":("直投下单ROI","SUM(direct_pay_amount)/NULLIF(SUM(cost),0)"),
+ "direct_real_roi":("直投成交ROI","SUM(direct_real_pay_amount)/NULLIF(SUM(cost),0)"),
 }
 def _bucket(gran):
     if gran=="month": return "to_char(date,'YYYY-MM')"
@@ -91,7 +97,12 @@ _DETAIL_METRICS = {  # 列key -> SQL 聚合表达式
  "orders":"SUM(orders)","pay_amount":"SUM(pay_amount)","roi":"SUM(pay_amount)/NULLIF(SUM(cost),0)",
  "real_pay_amount":"SUM(real_pay_amount)","real_orders":"SUM(real_orders)",
  "real_roi":"SUM(real_pay_amount)/NULLIF(SUM(cost),0)",
- "refund_rate":"SUM(refund_rate*cost)/NULLIF(SUM(cost),0)"}
+ "refund_rate":"SUM(refund_rate*cost)/NULLIF(SUM(cost),0)",
+ # 直投归因（小飞机=直推/沸点=直接/微橙=单品/麦斯=主投品）：下单(gross)+成交(net)，ROI 相对消费重算
+ "direct_orders":"SUM(direct_orders)","direct_pay_amount":"SUM(direct_pay_amount)",
+ "direct_roi":"SUM(direct_pay_amount)/NULLIF(SUM(cost),0)",
+ "direct_real_orders":"SUM(direct_real_orders)","direct_real_pay_amount":"SUM(direct_real_pay_amount)",
+ "direct_real_roi":"SUM(direct_real_pay_amount)/NULLIF(SUM(cost),0)"}
 _METRIC_SQL = ",".join(f"{e} {k}" for k,e in _DETAIL_METRICS.items())
 # 汇总行专用聚合：退款率 = (Σ付款 − Σ真实付款)/Σ付款，其余同 _DETAIL_METRICS
 _TOTALS_OVERRIDE = {"refund_rate": "(SUM(pay_amount)-SUM(real_pay_amount))*100.0/NULLIF(SUM(pay_amount),0)"}
@@ -171,7 +182,8 @@ def table(platforms:str=None, levels:str=None, start:str=None, end:str=None, lim
     c=db(); cur=c.cursor()
     cur.execute(f"SELECT count(*) n FROM ad_daily WHERE {w}",args); total=cur.fetchone()["n"]
     cur.execute(f"""SELECT platform,login_account,level,date,entity_name,account_name,parent_name,channel,
-        cost,impressions,clicks,ctr,cpm,cpc,conversions,orders,pay_amount,roi,real_pay_amount,real_orders,real_roi,refund_rate
+        cost,impressions,clicks,ctr,cpm,cpc,conversions,conversion_cost,orders,pay_amount,roi,real_pay_amount,real_orders,real_roi,refund_rate,
+        direct_orders,direct_pay_amount,direct_roi,direct_real_orders,direct_real_pay_amount,direct_real_roi
         FROM ad_daily WHERE {w} ORDER BY date DESC, cost DESC LIMIT %s OFFSET %s""",args+[limit,offset])
     rows=[dict(r) for r in cur.fetchall()]
     for r in rows: r["date"]=str(r["date"])
@@ -322,7 +334,7 @@ ACCOUNT_LEVELS=['推广账号','账户维度','账户']
 
 @app.get("/api/account_board")
 def account_board(start:str=None, end:str=None, platform:str=None, search:str=None,
-                  sort:str="cost", limit:int=100, offset:int=0):
+                  sort:str="cost", desc:bool=True, limit:int=100, offset:int=0, mode:str="summary"):
     cond=["level = ANY(%s)","cost IS NOT NULL"]; args=[ACCOUNT_LEVELS]
     if platform: cond.append("platform=%s"); args.append(platform)
     if start: cond.append("date>=%s"); args.append(start)
@@ -330,12 +342,16 @@ def account_board(start:str=None, end:str=None, platform:str=None, search:str=No
     if search: cond.append("(entity_name ILIKE %s OR entity_id ILIKE %s)"); args+=[f"%{search}%",f"%{search}%"]
     w=" AND ".join(cond)
     if sort not in _DETAIL_METRICS: sort="cost"
+    daily = (mode=="daily")                                  # 分日：多按 date 分组，每账户每天一行
+    grp = "platform,login_account,entity_id" + (",date" if daily else "")
+    datesel = "date::text AS date, " if daily else ""
+    order = ("date DESC, " if daily else "") + f"{_DETAIL_METRICS[sort]} {'DESC' if desc else 'ASC'} NULLS LAST"
     c=db(); cur=c.cursor()
-    cur.execute(f"SELECT count(*) n FROM (SELECT 1 FROM ad_daily WHERE {w} GROUP BY platform,login_account,entity_id) x", args)
+    cur.execute(f"SELECT count(*) n FROM (SELECT 1 FROM ad_daily WHERE {w} GROUP BY {grp}) x", args)
     total=cur.fetchone()["n"]
-    cur.execute(f"""SELECT platform, login_account, entity_id, max(entity_name) entity_name, max(channel) channel, {_METRIC_SQL}
-        FROM ad_daily WHERE {w} GROUP BY platform,login_account,entity_id
-        ORDER BY {_DETAIL_METRICS[sort]} DESC NULLS LAST LIMIT %s OFFSET %s""", args+[limit,offset])
+    cur.execute(f"""SELECT platform, login_account, entity_id, {datesel} max(entity_name) entity_name, max(channel) channel, {_METRIC_SQL}
+        FROM ad_daily WHERE {w} GROUP BY {grp}
+        ORDER BY {order} LIMIT %s OFFSET %s""", args+[limit,offset])
     rows=[dict(r) for r in cur.fetchall()]
     cur.execute("SELECT platform,entity_id,tags FROM account_tags")
     tagmap={(r["platform"],r["entity_id"]):r["tags"] for r in cur.fetchall()}

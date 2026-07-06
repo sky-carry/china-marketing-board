@@ -46,11 +46,11 @@
     </div>
 
     <div class="kpis">
-      <div class="kpi"><div class="t">总消费</div><div class="v">¥{{ fmt(kpi.cost) }}</div></div>
-      <div class="kpi"><div class="t">真实付款(GSV)</div><div class="v">¥{{ fmt(kpi.real_pay_amount) }}</div></div>
-      <div class="kpi"><div class="t">整体真实ROI</div><div class="v">{{ kpi.real_roi ?? '-' }}</div></div>
-      <div class="kpi"><div class="t">真实订单数</div><div class="v">{{ fmt(kpi.real_orders) }}</div></div>
-      <div class="kpi"><div class="t">加权退款率</div><div class="v">{{ kpi.refund_rate ?? '-' }}%</div></div>
+      <div class="kpi"><div class="t">总消费<el-tooltip :content="KPITIPS.cost" placement="top" effect="dark" :show-after="80"><el-icon class="tip-q"><QuestionFilled /></el-icon></el-tooltip></div><div class="v">¥{{ fmt(kpi.cost) }}</div></div>
+      <div class="kpi"><div class="t">真实付款(GSV)<el-tooltip :content="KPITIPS.real_pay_amount" placement="top" effect="dark" :show-after="80"><el-icon class="tip-q"><QuestionFilled /></el-icon></el-tooltip></div><div class="v">¥{{ fmt(kpi.real_pay_amount) }}</div></div>
+      <div class="kpi"><div class="t">整体真实ROI<el-tooltip :content="KPITIPS.real_roi" placement="top" effect="dark" :show-after="80"><el-icon class="tip-q"><QuestionFilled /></el-icon></el-tooltip></div><div class="v">{{ kpi.real_roi ?? '-' }}</div></div>
+      <div class="kpi"><div class="t">真实订单数<el-tooltip :content="KPITIPS.real_orders" placement="top" effect="dark" :show-after="80"><el-icon class="tip-q"><QuestionFilled /></el-icon></el-tooltip></div><div class="v">{{ fmt(kpi.real_orders) }}</div></div>
+      <div class="kpi"><div class="t">加权退款率<el-tooltip :content="KPITIPS.refund_rate" placement="top" effect="dark" :show-after="80"><el-icon class="tip-q"><QuestionFilled /></el-icon></el-tooltip></div><div class="v">{{ kpi.refund_rate ?? '-' }}%</div></div>
     </div>
 
     <div class="card grow">
@@ -62,8 +62,18 @@
 
 <script setup>
 import { ref, reactive, onMounted, onBeforeUnmount, computed } from 'vue'
+import { QuestionFilled } from '@element-plus/icons-vue'
 import api from '../api'
 import * as echarts from 'echarts'
+
+// 顶部 KPI 卡片的计算口径说明（悬浮 ? 显示）
+const KPITIPS = {
+  cost: '各平台广告消耗合计',
+  real_pay_amount: '真实付款(GSV)：扣除退款后的真实成交金额合计',
+  real_roi: '整体真实ROI = 真实付款 / 总消费',
+  real_orders: '真实订单数：扣除退款后的真实成交订单数',
+  refund_rate: '加权退款率 = Σ(各行退款率 × 消费) / Σ消费（按消费加权平均）',
+}
 
 const meta = reactive({ platforms: [], levels: {}, metrics: [], date_min: null, date_max: null })
 const sel = reactive({ platforms: [], level: '', metric: 'cost', gran: 'day', group: 'platform', range: null })
@@ -145,3 +155,9 @@ onBeforeUnmount(() => {
   chart && chart.dispose()
 })
 </script>
+
+<style scoped>
+/* KPI 卡片表头说明问号 */
+.tip-q { color: #a8abb2; font-size: 13px; margin-left: 3px; vertical-align: -1px; cursor: help; }
+.tip-q:hover { color: #409EFF; }
+</style>

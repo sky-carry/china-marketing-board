@@ -35,6 +35,12 @@
           <el-table-column v-for="col in columns" :key="col.key" :prop="col.key" :label="col.label"
             :width="col.width" :min-width="col.minWidth" :fixed="col.fixed" :sortable="col.sortable?'custom':false"
             :align="col.align||'right'" show-overflow-tooltip>
+            <template #header>
+              <span>{{ col.label }}</span>
+              <el-tooltip v-if="TIPS[col.key]" :content="TIPS[col.key]" placement="top" effect="dark" :show-after="80">
+                <el-icon class="tip-q" @click.stop><QuestionFilled /></el-icon>
+              </el-tooltip>
+            </template>
             <template #default="{ row }">
               <span v-if="row.__total && col.key===firstCol">总计</span>
               <span v-else>{{ fmt(row[col.key], col.type) }}</span>
@@ -54,7 +60,27 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
+import { QuestionFilled } from '@element-plus/icons-vue'
 import api from '../api'
+
+// 计算类/难懂字段的表头说明（悬浮 ? 显示计算口径）
+const TIPS = {
+  ctr: '点击率 = 点击量 / 展示量 × 100%',
+  cpm: 'CPM = 总消费 / 展示量 × 1000（每千次展示成本）',
+  cpc: 'CPC = 总消费 / 点击量（每次点击成本）',
+  conversion_cost: '转化成本 = 总消费 / 转化数',
+  roi: 'ROI = 付款金额 / 消费',
+  real_roi: '真实ROI = 真实付款 / 消费',
+  refund_rate: '退款率：汇总口径 =（付款金额 − 真实付款）/ 付款金额 × 100%',
+  pay_amount: '下单支付金额（含后续可能退款的部分）',
+  real_pay_amount: '扣除退款后的真实成交金额',
+  direct_orders: '直投归因下单量（小飞机=直推 / 沸点=直接 / 微橙=单品 / 麦斯=主投品）',
+  direct_pay_amount: '直投归因下单金额（小飞机=直推 / 沸点=直接 / 微橙=单品 / 麦斯=主投品）',
+  direct_roi: '直投下单ROI = 直投下单金额 / 消费',
+  direct_real_orders: '直投归因成交量（扣退款后）',
+  direct_real_pay_amount: '直投归因成交金额（扣退款后）',
+  direct_real_roi: '直投成交ROI = 直投成交金额 / 消费',
+}
 
 const route = useRoute()
 const platform = ref(route.params.name)
@@ -80,6 +106,12 @@ const columns = [
   { key:'real_pay_amount', label:'真实付款(元)', width:120, type:'money', sortable:true },
   { key:'real_orders', label:'真实订单', width:90, type:'int' },
   { key:'real_roi', label:'真实ROI', width:90, type:'roi' },
+  { key:'direct_pay_amount', label:'直投下单金额(元)', width:130, type:'money', sortable:true },
+  { key:'direct_orders', label:'直投下单量', width:100, type:'int', sortable:true },
+  { key:'direct_roi', label:'直投下单ROI', width:105, type:'roi', sortable:true },
+  { key:'direct_real_pay_amount', label:'直投成交金额(元)', width:130, type:'money', sortable:true },
+  { key:'direct_real_orders', label:'直投成交量', width:100, type:'int', sortable:true },
+  { key:'direct_real_roi', label:'直投成交ROI', width:105, type:'roi', sortable:true },
   { key:'conversions', label:'转化数', width:90, type:'int' },
   { key:'conversion_cost', label:'转化成本(元)', width:110, type:'money' },
   { key:'refund_rate', label:'退款率(%)', width:100, type:'rate' },
@@ -133,4 +165,6 @@ onMounted(async () => { await initMeta(); load() })
 <style>
 .total-row { background: #eef4ff !important; font-weight: 700; }
 .total-row td { background: #eef4ff !important; }
+.tip-q { color: #a8abb2; font-size: 13px; margin-left: 3px; vertical-align: -1px; cursor: help; }
+.tip-q:hover { color: #409EFF; }
 </style>
