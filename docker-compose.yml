@@ -11,13 +11,14 @@ services:
       TZ: Asia/Shanghai
     volumes:
       - cmb_pgdata:/var/lib/postgresql   # postgres:18+ 要求挂在此路径(数据落到版本子目录)
+    ports:
+      - "127.0.0.1:5433:5432"            # 仅本机可达，供 SSH 隧道给本地脚本写库(如小飞机短信登录)
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d ad_data"]
       interval: 5s
       timeout: 3s
       retries: 30
     restart: unless-stopped
-    # 不对外暴露端口，仅 compose 内部网络可达（避免与宿主其它 postgres 冲突）
 
   app:
     build: ./pipeline
@@ -26,6 +27,8 @@ services:
       TZ: Asia/Shanghai
     ports:
       - "8060:8060"
+    volumes:
+      - cmb_profiles:/app/profiles        # 浏览器登录态持久化(跨容器重建保留会话，减少重登)
     depends_on:
       db:
         condition: service_healthy
@@ -33,3 +36,4 @@ services:
 
 volumes:
   cmb_pgdata:
+  cmb_profiles:

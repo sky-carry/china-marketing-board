@@ -13,6 +13,10 @@ ENV PYTHONUNBUFFERED=1 TZ=Asia/Shanghai
 COPY requirements.txt .
 # 国内服务器直连 pypi.org 极慢，使用清华镜像加速
 RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple --timeout 60 -r requirements.txt
+# Playwright + Chromium：服务器端自动重登 沸点/微橙/麦斯（headless，无需人工）；浏览器走 npmmirror 镜像
+ENV PLAYWRIGHT_DOWNLOAD_HOST=https://cdn.npmmirror.com/binaries/playwright
+RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple playwright \
+ && playwright install --with-deps chromium
 # 后端代码
 COPY *.py ./
 # 前端构建产物（app.py 从 web/dist 托管）

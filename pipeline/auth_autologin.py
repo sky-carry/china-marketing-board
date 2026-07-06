@@ -127,19 +127,22 @@ def fill_password_login(pg, platform, user, pw):
 def run(account_id, headless=True):
     c = psycopg2.connect(DSN); c.autocommit = True
     cur = c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("SELECT platform,tag,username,password FROM accounts WHERE id=%s", (account_id,))
+    cur.execute("SELECT platform,tag,username,password,auth FROM accounts WHERE id=%s", (account_id,))
     row = cur.fetchone()
     if not row:
         print("FAIL account not found"); return 1
     platform, tag = row["platform"], row["tag"]
     user, pw = row.get("username"), row.get("password")
+    old_auth = dict(row.get("auth") or {})   # 保留 op_uids 等自定义字段，重登时合并而非覆盖
     need = need_keys(platform)
     g = {}
 
     with sync_playwright() as p:
         ctx = p.chromium.launch_persistent_context(
             profile_dir(tag), headless=headless, user_agent=UA,
-            args=["--no-proxy-server", "--start-maximized"], no_viewport=True)
+            # --no-sandbox / --disable-dev-shm-usage：容器内以 root 运行 Chromium 的必需项
+            args=["--no-proxy-server", "--start-maximized", "--no-sandbox", "--disable-dev-shm-usage"],
+            no_viewport=True)
         pg = ctx.pages[0] if ctx.pages else ctx.new_page()
         pg.on("request", make_capturer(platform, g))
         try:
@@ -192,8 +195,9 @@ def run(account_id, headless=True):
         ctx.close()
 
     if session_ok:
+        merged = {**old_auth, **g}   # 合并：新抓到的 token 覆盖旧值，保留 op_uids 等未变字段
         cur.execute("UPDATE accounts SET auth=%s, token_status='ok', token_updated_at=now() WHERE id=%s",
-                    (psycopg2.extras.Json(g), account_id))
+                    (psycopg2.extras.Json(merged), account_id))
         print("OK 已更新凭证:", list(g.keys())); return 0
     if platform == "小飞机":
         cur.execute("UPDATE accounts SET token_status='need_login' WHERE id=%s", (account_id,))
