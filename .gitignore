@@ -22,3 +22,4 @@ profiles/
 *.log
 .DS_Store
 Thumbs.db
+pipeline/auth_secret.txt

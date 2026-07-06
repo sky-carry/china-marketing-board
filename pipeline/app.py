@@ -2,11 +2,12 @@
 """投放数据平台 后端 (FastAPI)。
 运行: uvicorn app:app --host 0.0.0.0 --port 8000
 提供: 账号管理 / 数据查询(看板) / 任务&运行 / 登录刷新 API，并托管前端静态文件。"""
-import os, datetime, psycopg2, psycopg2.extras
+import os, datetime, hashlib, hmac, base64, json, time, secrets, psycopg2, psycopg2.extras
 from fastapi import FastAPI, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
+from starlette.requests import Request
 
 HERE=os.path.dirname(os.path.abspath(__file__))
 DSN=os.environ.get("DATABASE_URL","postgresql://postgres:postgres@localhost:5432/ad_data")
@@ -26,6 +27,70 @@ def fmt_dt(v):
 
 app=FastAPI(title="投放数据平台")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+# ============================ 登录鉴权(单账户共享) ============================
+# 密码哈希(pbkdf2)存 DB；登录发 HMAC 签名 token（无状态，服务重启也不失效）。
+_SECRET_FILE=os.path.join(HERE,"auth_secret.txt")
+def _auth_secret():
+    try: return open(_SECRET_FILE,"rb").read().strip()
+    except Exception:
+        s=secrets.token_hex(32).encode()
+        try: open(_SECRET_FILE,"wb").write(s)
+        except Exception: pass
+        return s
+_SECRET=_auth_secret()
+def _hash_pw(pw, salt):
+    return base64.b64encode(hashlib.pbkdf2_hmac("sha256", pw.encode(), bytes.fromhex(salt), 100000)).decode()
+def _make_token(username, days=7):
+    exp=int(time.time())+days*86400
+    payload=base64.urlsafe_b64encode(json.dumps({"u":username,"exp":exp}).encode()).decode().rstrip("=")
+    sig=hmac.new(_SECRET, payload.encode(), hashlib.sha256).hexdigest()
+    return f"{payload}.{sig}"
+def _verify_token(token):
+    try:
+        payload,sig=token.split(".")
+        if not hmac.compare_digest(sig, hmac.new(_SECRET, payload.encode(), hashlib.sha256).hexdigest()): return None
+        data=json.loads(base64.urlsafe_b64decode(payload+"="*(-len(payload)%4)))
+        return data.get("u") if data.get("exp",0)>=time.time() else None
+    except Exception:
+        return None
+
+_PUBLIC_API={"/api/login","/api/health"}
+@app.middleware("http")
+async def _auth_mw(request:Request, call_next):
+    path=request.url.path
+    if request.method!="OPTIONS" and path.startswith("/api/") and path not in _PUBLIC_API:
+        auth=request.headers.get("authorization","")
+        token=auth[7:] if auth.startswith("Bearer ") else request.cookies.get("token","")
+        if not _verify_token(token):
+            return JSONResponse({"detail":"未登录或登录已过期"}, status_code=401)
+    return await call_next(request)
+
+@app.post("/api/login")
+def login(body:dict=Body(...)):
+    u=(body.get("username") or "").strip(); pw=body.get("password") or ""
+    c=db(); cur=c.cursor()
+    cur.execute("SELECT username,salt,pw_hash FROM auth_users WHERE username=%s",(u,))
+    row=cur.fetchone(); c.close()
+    if not row or not hmac.compare_digest(_hash_pw(pw,row["salt"]), row["pw_hash"]):
+        raise HTTPException(401,"账号或密码错误")
+    return {"ok":True,"token":_make_token(u),"username":u}
+
+@app.get("/api/me")
+def me():  # 能进到这里说明中间件已放行(token 有效)
+    return {"ok":True}
+
+@app.post("/api/change_password")
+def change_password(body:dict=Body(...)):
+    u=(body.get("username") or "").strip(); old=body.get("old") or ""; new=body.get("new") or ""
+    if len(new)<6: raise HTTPException(400,"新密码至少 6 位")
+    c=db(); c.autocommit=True; cur=c.cursor()
+    cur.execute("SELECT salt,pw_hash FROM auth_users WHERE username=%s",(u,)); row=cur.fetchone()
+    if not row or not hmac.compare_digest(_hash_pw(old,row["salt"]), row["pw_hash"]):
+        c.close(); raise HTTPException(401,"原密码错误")
+    salt=secrets.token_hex(16)
+    cur.execute("UPDATE auth_users SET salt=%s,pw_hash=%s,updated_at=now() WHERE username=%s",(salt,_hash_pw(new,salt),u))
+    c.close(); return {"ok":True}
 
 # ============================ 指标定义(SQL 聚合，比率按明细重算) ============================
 METRICS={
@@ -404,6 +469,14 @@ def _ensure_tables():
         platform text, entity_id text, tags jsonb DEFAULT '[]',
         updated_at timestamptz DEFAULT now(), PRIMARY KEY(platform,entity_id))""")
     cur.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS daily_time text")  # 每日定时(HH:MM)，空则用 interval_minutes
+    # 登录账户表：默认种子账户 skg
+    cur.execute("""CREATE TABLE IF NOT EXISTS auth_users (
+        username text PRIMARY KEY, salt text, pw_hash text, updated_at timestamptz DEFAULT now())""")
+    cur.execute("SELECT count(*) n FROM auth_users")
+    if cur.fetchone()["n"]==0:
+        salt=secrets.token_hex(16)
+        cur.execute("INSERT INTO auth_users(username,salt,pw_hash) VALUES(%s,%s,%s)",
+            ("skg", salt, _hash_pw("skg@A168", salt)))
     c.close()
 
 def _seed_and_schedule():

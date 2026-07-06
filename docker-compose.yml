@@ -29,6 +29,7 @@ services:
       - "8060:8060"
     volumes:
       - cmb_profiles:/app/profiles        # 浏览器登录态持久化(跨容器重建保留会话，减少重登)
+      - ./appdata/auth_secret.txt:/app/auth_secret.txt   # 登录签名密钥持久化(否则每次重建会登出所有人)
     depends_on:
       db:
         condition: service_healthy
