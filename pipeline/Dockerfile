@@ -15,7 +15,10 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple --timeout 60 -r requirements.txt
 # Playwright + Chromium：服务器端自动重登 沸点/微橙/麦斯（headless，无需人工）；浏览器走 npmmirror 镜像
 ENV PLAYWRIGHT_DOWNLOAD_HOST=https://cdn.npmmirror.com/binaries/playwright
-RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple playwright \
+# apt 换清华 Debian 镜像（--with-deps 要 apt 装 chromium 系统库；官方源国内极慢）
+RUN (sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || true) \
+ && (sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list 2>/dev/null || true) \
+ && pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple playwright \
  && playwright install --with-deps chromium
 # 后端代码
 COPY *.py ./
