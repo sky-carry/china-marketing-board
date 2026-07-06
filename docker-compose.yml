@@ -1,0 +1,35 @@
+# 投放数据平台 —— Docker 部署
+# 启动：docker compose up -d --build
+# 访问：http://<服务器IP>:8060
+services:
+  db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ad_data
+      TZ: Asia/Shanghai
+    volumes:
+      - cmb_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ad_data"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+    # 不对外暴露端口，仅 compose 内部网络可达（避免与宿主其它 postgres 冲突）
+
+  app:
+    build: ./pipeline
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/ad_data
+      TZ: Asia/Shanghai
+    ports:
+      - "8060:8060"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  cmb_pgdata:

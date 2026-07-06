@@ -7,7 +7,7 @@ import psycopg2, psycopg2.extras
 from playwright.sync_api import sync_playwright
 
 HERE=os.path.dirname(os.path.abspath(__file__))
-DSN="postgresql://postgres:postgres@localhost:5432/ad_data"
+DSN=os.environ.get("DATABASE_URL","postgresql://postgres:postgres@localhost:5432/ad_data")
 PROFILES=os.path.join(HERE,"profiles")
 CLICK="""(name)=>{let e=[...document.querySelectorAll('*')].filter(x=>x.children.length===0&&(x.textContent||'').trim()===name);e.sort((a,b)=>a.textContent.length-b.textContent.length);if(e.length){e[0].click();return true}return false}"""
 ENTRY={"小飞机":"https://td.smallfighter.com/#serving","沸点":"https://admin.fifay.cn/admin/index.html",

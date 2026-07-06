@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 """建 accounts 表 + tasks/runs 表，并把现有 creds.json 迁入（麦斯 token 从 ms_token.json 取实值）。"""
+import os
 import psycopg2, psycopg2.extras, json, os, io, sys
 sys.stdout=io.TextIOWrapper(sys.stdout.buffer,encoding="utf-8")
 HERE=os.path.dirname(os.path.abspath(__file__))
-DSN="postgresql://postgres:postgres@localhost:5432/ad_data"
+DSN=os.environ.get("DATABASE_URL","postgresql://postgres:postgres@localhost:5432/ad_data")
 c=psycopg2.connect(DSN); c.autocommit=True; cur=c.cursor()
 
 cur.execute("""

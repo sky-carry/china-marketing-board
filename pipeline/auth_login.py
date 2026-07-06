@@ -2,13 +2,14 @@
 """登录/刷新 token：为某个 account 打开浏览器(服务器机器上)，用户登录后抓取凭证并写回 DB。
 用法(子进程): python auth_login.py <account_id>
 """
+import os
 import sys, os, io, time, json, urllib.parse
 sys.stdout=io.TextIOWrapper(sys.stdout.buffer,encoding="utf-8")
 import psycopg2, psycopg2.extras
 from playwright.sync_api import sync_playwright
 
 HERE=os.path.dirname(os.path.abspath(__file__))
-DSN="postgresql://postgres:postgres@localhost:5432/ad_data"
+DSN=os.environ.get("DATABASE_URL","postgresql://postgres:postgres@localhost:5432/ad_data")
 PROFILES=os.path.join(HERE,"profiles")
 UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
 CLICK="""(name)=>{let e=[...document.querySelectorAll('*')].filter(x=>x.children.length===0&&(x.textContent||'').trim()===name);e.sort((a,b)=>a.textContent.length-b.textContent.length);if(e.length){e[0].click();return true}return false}"""

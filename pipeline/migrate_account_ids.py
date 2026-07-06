@@ -5,13 +5,14 @@
 账户级 entity_id 是主键一部分，迁移用「先改不冲突、再删冲突旧行」保证不丢数据。
 运行: python migrate_account_ids.py
 """
+import os
 import io, sys, json, datetime, urllib.request, urllib.parse
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 sys.path.insert(0, "d:/skgcode/china-marketing-board/pipeline")
 import fetchers as F
 import psycopg2
 
-DSN = "postgresql://postgres:postgres@localhost:5432/ad_data"
+DSN = os.environ.get("DATABASE_URL","postgresql://postgres:postgres@localhost:5432/ad_data")
 XFJ_LOGINS = ["小飞机·sdjr@shun.tt", "小飞机·135796@qq.com", "小飞机·ayh@kdys001.com"]
 WC_LOGINS = ["微橙·SKG", "微橙·SKG品牌"]
 

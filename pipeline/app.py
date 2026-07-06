@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 HERE=os.path.dirname(os.path.abspath(__file__))
-DSN="postgresql://postgres:postgres@localhost:5432/ad_data"
+DSN=os.environ.get("DATABASE_URL","postgresql://postgres:postgres@localhost:5432/ad_data")
 def db():
     c=psycopg2.connect(DSN); c.cursor_factory=psycopg2.extras.RealDictCursor; return c
 

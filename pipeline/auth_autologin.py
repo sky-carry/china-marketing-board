@@ -7,13 +7,14 @@
 用法(子进程): python auth_autologin.py <account_id>
 返回: 打印 OK/FAIL/NEED_LOGIN，并把新凭证写回 DB。
 """
+import os
 import sys, os, io, time, json, urllib.parse
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 import psycopg2, psycopg2.extras
 from playwright.sync_api import sync_playwright
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DSN = "postgresql://postgres:postgres@localhost:5432/ad_data"
+DSN = os.environ.get("DATABASE_URL","postgresql://postgres:postgres@localhost:5432/ad_data")
 PROFILES = os.path.join(HERE, "profiles")
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36")

@@ -27,7 +27,7 @@ def _ms_token():
     try: return json.load(open(os.path.join(HERE,"ms_token.json")))
     except: return {"t":"","s":""}
 
-DSN = "postgresql://postgres:postgres@localhost:5432/ad_data"
+DSN = os.environ.get("DATABASE_URL","postgresql://postgres:postgres@localhost:5432/ad_data")
 def load_logins(enabled_only=True):
     """从 DB accounts 表读取登录；失败则回退 creds.json。"""
     try:

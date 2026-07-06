@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """PostgreSQL 入库：UPSERT 到 ad_daily，并记录 crawl_progress。"""
-import psycopg2, psycopg2.extras
+import os, psycopg2, psycopg2.extras
 from fetchers import DBCOLS
 
-DSN = "postgresql://postgres:postgres@localhost:5432/ad_data"
+DSN = os.environ.get("DATABASE_URL","postgresql://postgres:postgres@localhost:5432/ad_data")
 _MET = [c for c in DBCOLS if c not in ("platform","login_account","level","entity_id","date")]
 
 def connect():

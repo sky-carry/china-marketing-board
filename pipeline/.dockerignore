@@ -1,0 +1,11 @@
+web/node_modules
+web/dist
+__pycache__
+*.pyc
+*.pyo
+profiles/
+.*_profile/
+creds.json
+ms_token.json
+*.log
+*.csv
