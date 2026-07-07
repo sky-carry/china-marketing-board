@@ -121,19 +121,15 @@ FD_IDNAME={"ADVERTISER":(["advertiserId"],["advertiserName"],[],[]),
  "PROJECT":(["projectId"],["projectName"],["advertiserId"],["advertiserName"]),
  "PROMOTION":(["adId"],["adName"],["projectId"],["projectName"]),
  "MATERIAL":(["materialId"],["materialName"],["advertiserId"],["advertiserName"])}
-def fetch_fd(login,level,day):
-    a=login["auth"]; art=FD_LEVELS[level]; H=100
-    hdr={"accept":"application/json","content-type":"application/json","did":a["did"],"token":a["token"],
-         "version":"1.0.2","platform":"h5","origin":"https://admin.fifay.cn","referer":"https://admin.fifay.cn/","accept-encoding":"identity","user-agent":UA}
-    ds=day.isoformat(); items=[]; page=1
-    while True:
-        b=json.dumps({"current":page,"pageSize":200,"startDate":ds,"endDate":ds,"adReportType":art,"orderDesc":2}).encode()
-        req=urllib.request.Request("https://api.fifay.cn/fifay-ad/report/union/get",data=b,headers=hdr,method="POST")
-        d=json.loads(urllib.request.urlopen(req,timeout=60).read())["data"]
-        items+=d.get("list") or []
-        if d.get("endPage") or len(items)>=d.get("total",0) or not d.get("list"): break
-        page+=1; time.sleep(0.1)
-    idk,namek,pidk,pnamek=FD_IDNAME[art]; out=[]
+# 官方API取数字段：direct*/间接数据须显式请求才返回（见 docs/沸点报表API对接文档.md）
+FD_API_FIELDS=["showCount","clickCount","cost","convertCount","ctr","cpm","cpc",
+ "originOrderCount","originOrderAmount","originOrderRoi","orderCount","orderAmount","orderRoi","refundOrderRate",
+ "directOriginOrderCount","directOriginOrderAmount","directOriginOrderRoi",
+ "directOrderCount","directOrderAmount","directOrderRoi"]
+
+def _fd_rows(art, items):
+    """沸点原始 list -> 统一指标行。网页接口与官方API字段一致，共用此映射：金额÷100转元，比率÷100转百分数。"""
+    idk,namek,pidk,pnamek=FD_IDNAME[art]; H=100; out=[]
     for it in items:
         cost=_num(it.get('cost'))
         if not cost: continue
@@ -150,6 +146,44 @@ def fetch_fd(login,level,day):
             "direct_orders":_i(it.get('directOriginOrderCount')),"direct_pay_amount":_r((_num(it.get('directOriginOrderAmount')) or 0)/H),"direct_roi":_r((_num(it.get('directOriginOrderRoi')) or 0)/H),
             "direct_real_orders":_i(it.get('directOrderCount')),"direct_real_pay_amount":_r((_num(it.get('directOrderAmount')) or 0)/H),"direct_real_roi":_r((_num(it.get('directOrderRoi')) or 0)/H)})
     return out
+
+def fetch_fd_legacy(login,level,day):
+    """【备份】沸点网页后台接口：借登录态 token/did（会过期）。"""
+    a=login["auth"]; art=FD_LEVELS[level]
+    hdr={"accept":"application/json","content-type":"application/json","did":a["did"],"token":a["token"],
+         "version":"1.0.2","platform":"h5","origin":"https://admin.fifay.cn","referer":"https://admin.fifay.cn/","accept-encoding":"identity","user-agent":UA}
+    ds=day.isoformat(); items=[]; page=1
+    while True:
+        b=json.dumps({"current":page,"pageSize":200,"startDate":ds,"endDate":ds,"adReportType":art,"orderDesc":2}).encode()
+        req=urllib.request.Request("https://api.fifay.cn/fifay-ad/report/union/get",data=b,headers=hdr,method="POST")
+        d=json.loads(urllib.request.urlopen(req,timeout=60).read())["data"]
+        items+=d.get("list") or []
+        if d.get("endPage") or len(items)>=d.get("total",0) or not d.get("list"): break
+        page+=1; time.sleep(0.1)
+    return _fd_rows(art, items)
+
+def fetch_fd_api(login,level,day):
+    """沸点官方开放API：Bearer 令牌（稳定，不依赖登录态）。字段/单位与网页接口一致；direct/间接须 customizeFields。"""
+    a=login["auth"]; art=FD_LEVELS[level]
+    hdr={"Authorization":"Bearer "+a["api_key"],"Content-Type":"application/json","accept-encoding":"identity","user-agent":UA}
+    ds=day.isoformat(); items=[]; page=1
+    while True:
+        b=json.dumps({"adReportType":art,"startDate":ds,"endDate":ds,"current":page,"pageSize":200,
+                      "customizeFields":FD_API_FIELDS}).encode()
+        req=urllib.request.Request("https://api.fifay.cn/fifay-ad/report/union/get",data=b,headers=hdr,method="POST")
+        resp=json.loads(urllib.request.urlopen(req,timeout=60).read().decode("utf-8","replace"))
+        code=resp.get("code")
+        if code!=200:   # 40001=令牌过期(含 token/expired 关键字以便判为鉴权错误)
+            raise RuntimeError(f"沸点API {'token expired login' if code==40001 else 'error'} code={code} msg={resp.get('message')}")
+        d=resp.get("data") or {}
+        items+=d.get("list") or []
+        if d.get("endPage") or len(items)>=d.get("total",0) or not d.get("list"): break
+        page+=1; time.sleep(0.1)
+    return _fd_rows(art, items)
+
+def fetch_fd(login,level,day):
+    """沸点入口：账号 auth 含 api_key 走官方API，否则回退网页接口(备份)。"""
+    return fetch_fd_api(login,level,day) if login["auth"].get("api_key") else fetch_fd_legacy(login,level,day)
 
 # ============================ 微橙 ============================
 WC_LEVELS={"账户":"SecondAccountData/businessFindsDev","计划":"PlanData/businessFindsDev","素材":"MaterialData/findsDev"}
