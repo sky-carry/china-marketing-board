@@ -270,8 +270,45 @@ def fetch_ms(login,level,day):
             "direct_real_orders":_i(it.get('direct_all_gsv_no')),"direct_real_pay_amount":_r(it.get('direct_all_gsv')),"direct_real_roi":_r(it.get('direct_gsv_roi'))})
     return out
 
-FETCH={"小飞机":fetch_xfj,"沸点":fetch_fd,"微橙":fetch_wc,"麦斯":fetch_ms}
-LEVELS={"小飞机":list(XFJ_LEVELS),"沸点":list(FD_LEVELS),"微橙":list(WC_LEVELS),"麦斯":list(MS_LEVELS)}
+# ============================ 方块(新巨量·抖音千川CID, 历史数据) ============================
+# quanyu.fangkuai.link RuoYi后台。登录: POST /prod-api/auth/login {username,password,code,uuid}(图形验证码)->access_token。
+# 报表(账户级,逐日): POST selectSuperOceanengineAdvertisersAllData {startDate,endDate=同一天}。数值均自然单位(元/%/倍)，无需缩放。
+# 历史数据、平台已停更；auth.token 为登录得到的 access_token(约12h过期，无法免验证码自动续)。
+FK_API="https://quanyu.fangkuai.link/prod-api"
+FK_EP="/superoceanengine/newSuperOceanengineAdvertisers/selectSuperOceanengineAdvertisersAllData"
+def fetch_fk(login,level,day):
+    a=login["auth"]; ds=day.isoformat(); items=[]; page=1
+    hdr={"Authorization":"Bearer "+a["token"],"Content-Type":"application/json;charset=UTF-8",
+         "accept-encoding":"identity","user-agent":UA,"Referer":"https://quanyu.fangkuai.link/"}
+    while True:
+        body={"pageNum":page,"pageSize":300,"differentiateLineType":"2","lineType":"","selectedField":"",
+              "advertiserId":None,"startDate":ds,"endDate":ds}
+        req=urllib.request.Request(FK_API+FK_EP,data=json.dumps(body).encode(),headers=hdr,method="POST")
+        r=json.loads(urllib.request.urlopen(req,timeout=60).read().decode("utf-8","replace"))
+        if r.get("rows") is None and r.get("code") not in (200,None):
+            raise RuntimeError(f"方块API code={r.get('code')} msg={r.get('msg')} (token/login 可能失效)")
+        rows=r.get("rows") or []; items+=rows
+        if len(items)>=(r.get("total") or 0) or not rows: break
+        page+=1; time.sleep(0.1)
+    out=[]
+    for it in items:
+        cost=_num(it.get("statCost"))
+        if not cost: continue
+        out.append({"entity_id":str(it.get("advertiserId")),"entity_name":it.get("advertiserName"),
+            "account_id":str(it.get("advertiserId") or ""),"account_name":it.get("advertiserName"),
+            "parent_id":None,"parent_name":None,"channel":"巨量千川",
+            "cost":_r(cost),"impressions":_i(it.get("showCnt")),"clicks":_i(it.get("clickCnt")),
+            "ctr":_r(it.get("ctr")),"cpm":_r(it.get("cpmPlatform")),"cpc":_r(it.get("cpcPlatform")),
+            "conversions":_i(it.get("convertCnt")),"conversion_cost":_r(it.get("conversionCost")),
+            "orders":_i(it.get("goodsCount")),"pay_amount":_r(it.get("goodsPrice")),"roi":_r(it.get("roi")),
+            "real_pay_amount":_r(it.get("dischargeBackGoodsPrice")),"real_orders":_i(it.get("dischargeBackGoodsCount")),"real_roi":_r(it.get("dischargeBackROI")),
+            "refund_rate":_r(it.get("goodsPriceRefundRate")),
+            "direct_orders":_i(it.get("goodsDirectCount")),"direct_pay_amount":_r(it.get("goodsDirectPrice")),"direct_roi":_r(it.get("directRoi")),
+            "direct_real_orders":_i(it.get("directDischargeBackGoodsCount")),"direct_real_pay_amount":_r(it.get("directDischargeBackGoodsPrice")),"direct_real_roi":_r(it.get("directDischargeBackROI"))})
+    return out
+
+FETCH={"小飞机":fetch_xfj,"沸点":fetch_fd,"微橙":fetch_wc,"麦斯":fetch_ms,"方块":fetch_fk}
+LEVELS={"小飞机":list(XFJ_LEVELS),"沸点":list(FD_LEVELS),"微橙":list(WC_LEVELS),"麦斯":list(MS_LEVELS),"方块":["账户"]}
 
 def fetch(login,level,day):
     """返回归一化 dict 列表（含 platform/login_account/level/date）"""
