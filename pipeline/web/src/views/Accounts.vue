@@ -24,7 +24,7 @@
         </el-table-column>
         <el-table-column label="启用" width="60">
           <template #default="{ row }">
-            <el-switch v-model="row.enabled" size="small" @change="v => toggle(row, v)" />
+            <el-switch v-model="row.enabled" size="small" :disabled="row.is_historical" @change="v => toggle(row, v)" />
           </template>
         </el-table-column>
         <el-table-column label="登录态" width="100">
@@ -109,8 +109,9 @@ async function save() {
 async function toggle(row, v) { await api.put(`/accounts/${row.id}`, { enabled: v }) }
 async function toggleHistorical(row) {
   const to = !row.is_historical
-  if (to) await ElMessageBox.confirm(`把 ${row.tag} 设为历史账号？将停止抓取并置于列表底部（已入库数据保留）`, '确认', { type: 'warning' })
-  await api.put(`/accounts/${row.id}`, { is_historical: to })
+  if (to) await ElMessageBox.confirm(`把 ${row.tag} 设为历史账号？将停止抓取、取消启用并置于列表底部（已入库数据保留）`, '确认', { type: 'warning' })
+  // 设为历史 -> 同时取消启用；恢复 -> 重新启用
+  await api.put(`/accounts/${row.id}`, { is_historical: to, enabled: !to })
   ElMessage.success(to ? '已设为历史账号' : '已恢复'); load()
 }
 async function del(row) {

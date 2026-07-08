@@ -96,7 +96,7 @@ def crawl_window(window_days=15, platform=None, mark_expired=True, auto_relogin=
         if not lg.get("auth"):   # 未登录(空凭证)：跳过，不触碰状态
             continue
         attempted.add(lg["tag"])
-        for lv in F.LEVELS[lg["platform"]]:
+        for lv in F.LEVELS.get(lg["platform"], []):   # 未知平台(代码未加载)跳过，不崩溃
             units.append((lg,lv))
     total=0; errs=[]; bad_logins=set()
     if units:

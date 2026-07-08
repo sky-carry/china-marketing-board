@@ -298,6 +298,8 @@ def update_account(aid:int, body:dict=Body(...)):
     if "tag" in body:
         cur.execute("SELECT tag FROM accounts WHERE id=%s",(aid,)); r=cur.fetchone()
         old_tag=r["tag"] if r else None
+    if body.get("is_historical") is True and "enabled" not in body:
+        body["enabled"]=False   # 历史账号强制不启用
     sets=[]; args=[]
     for k in ("platform","tag","enabled","note","username","password","is_historical"):
         if k in body: sets.append(f"{k}=%s"); args.append(body[k])

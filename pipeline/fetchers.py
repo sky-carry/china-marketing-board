@@ -185,6 +185,28 @@ def fetch_fd(login,level,day):
     """沸点入口：账号 auth 含 api_key 走官方API，否则回退网页接口(备份)。"""
     return fetch_fd_api(login,level,day) if login["auth"].get("api_key") else fetch_fd_legacy(login,level,day)
 
+# ============================ 博擎 (fifay 换皮，同一套接口/字段) ============================
+# 博擎(bccid.jingcaiplus.com) 是沸点(fifay) 的白标系统，连接口都用 api.fifay.cn，字段与沸点一致。
+BQ_LEVELS={"账户维度":"ADVERTISER"}
+def fetch_bq(login,level,day):
+    a=login["auth"]; art=BQ_LEVELS[level]
+    hdr={"accept":"application/json","content-type":"application/json","did":a["did"],"token":a["token"],
+         "version":"1.0.2","platform":"h5","origin":"https://bccid.jingcaiplus.com","referer":"https://bccid.jingcaiplus.com/","accept-encoding":"identity","user-agent":UA}
+    ds=day.isoformat(); items=[]; page=1
+    while True:
+        b=json.dumps({"current":page,"pageSize":200,"startDate":ds,"endDate":ds,"adReportType":art,"orderDesc":2}).encode()
+        req=urllib.request.Request("https://api.fifay.cn/fifay-ad/report/union/get",data=b,headers=hdr,method="POST")
+        resp=json.loads(urllib.request.urlopen(req,timeout=60).read().decode("utf-8","replace"))
+        if resp.get("code")!=200:   # 非200多为登录态失效，抛含 token/login 关键字的错误以触发自动重登
+            raise RuntimeError(f"博擎 token expired login code={resp.get('code')} msg={resp.get('message')}")
+        d=resp.get("data") or {}
+        items+=d.get("list") or []
+        if d.get("endPage") or len(items)>=d.get("total",0) or not d.get("list"): break
+        page+=1; time.sleep(0.1)
+    rows=_fd_rows(art, items)
+    for r in rows: r["channel"]="博擎"
+    return rows
+
 # ============================ 微橙 ============================
 WC_LEVELS={"账户":"SecondAccountData/businessFindsDev","计划":"PlanData/businessFindsDev","素材":"MaterialData/findsDev"}
 WC_IDNAME={"账户":(["advertiser_id"],["advertiser_name"],[],[]),
@@ -307,8 +329,8 @@ def fetch_fk(login,level,day):
             "direct_real_orders":_i(it.get("directDischargeBackGoodsCount")),"direct_real_pay_amount":_r(it.get("directDischargeBackGoodsPrice")),"direct_real_roi":_r(it.get("directDischargeBackROI"))})
     return out
 
-FETCH={"小飞机":fetch_xfj,"沸点":fetch_fd,"微橙":fetch_wc,"麦斯":fetch_ms,"方块":fetch_fk}
-LEVELS={"小飞机":list(XFJ_LEVELS),"沸点":list(FD_LEVELS),"微橙":list(WC_LEVELS),"麦斯":list(MS_LEVELS),"方块":["账户"]}
+FETCH={"小飞机":fetch_xfj,"沸点":fetch_fd,"微橙":fetch_wc,"麦斯":fetch_ms,"方块":fetch_fk,"博擎":fetch_bq}
+LEVELS={"小飞机":list(XFJ_LEVELS),"沸点":list(FD_LEVELS),"微橙":list(WC_LEVELS),"麦斯":list(MS_LEVELS),"方块":["账户"],"博擎":list(BQ_LEVELS)}
 
 def fetch(login,level,day):
     """返回归一化 dict 列表（含 platform/login_account/level/date）"""

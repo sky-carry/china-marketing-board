@@ -24,8 +24,9 @@ ENTRY = {
     "沸点": "https://admin.fifay.cn/admin/index.html",
     "微橙": "https://business.douyongtuan.com/#/tiktok",
     "麦斯": "https://ad.maxengine.cn/media_data/xhs",
+    "博擎": "https://bccid.jingcaiplus.com/admin/index.html",   # fifay 换皮，登录/接口同沸点
 }
-PW_PLATFORMS = ("沸点", "微橙", "麦斯", "小飞机")  # 可纯密码自动登录(小飞机正常登录只需账号密码，验证码仅多次失败才触发)
+PW_PLATFORMS = ("沸点", "微橙", "麦斯", "小飞机", "博擎")  # 可纯密码自动登录(小飞机正常登录只需账号密码，验证码仅多次失败才触发)
 
 CLICK = ("(name)=>{let e=[...document.querySelectorAll('*')].filter(x=>x.children.length===0&&"
          "(x.textContent||'').trim()===name);e.sort((a,b)=>a.textContent.length-b.textContent.length);"
@@ -34,17 +35,18 @@ CLICK = ("(name)=>{let e=[...document.querySelectorAll('*')].filter(x=>x.childre
 # 数据页地址：抓 token 的接口要在这些页面上才会触发
 DATA_URL = {
     "沸点": "https://admin.fifay.cn/admin/index.html#/data?tab=1",
+    "博擎": "https://bccid.jingcaiplus.com/admin/index.html#/data?tab=1",
 }
 
 
 def trigger_data(pg, platform):
     """登录后导航/点击到能触发带凭证接口的数据页。"""
     try:
-        if platform == "沸点":
+        if platform in ("沸点", "博擎"):
             pg.evaluate(CLICK, "抖音数据看板")
             pg.wait_for_timeout(800)
             if "/data" not in pg.url:
-                pg.goto(DATA_URL["沸点"], timeout=30000)
+                pg.goto(DATA_URL[platform], timeout=30000)
         elif platform == "麦斯":
             pg.evaluate(CLICK, "广告平台"); pg.wait_for_timeout(600); pg.evaluate(CLICK, "聚光平台")
         elif platform == "微橙":
@@ -71,7 +73,7 @@ def make_capturer(platform, g):
                 for part in h.get("cookie", "").split("; "):
                     if part.startswith("td.sid="):
                         g["sid"] = part[7:]
-        elif platform == "沸点" and "api.fifay.cn" in u:
+        elif platform in ("沸点", "博擎") and "api.fifay.cn" in u:   # 博擎也走 api.fifay.cn
             if h.get("token"):
                 g["token"] = h["token"]
                 g["did"] = h.get("did", "")
@@ -89,14 +91,14 @@ def make_capturer(platform, g):
 
 def need_keys(platform):
     return (("token", "sid", "op_uid") if platform == "小飞机" else
-            ("token", "did") if platform == "沸点" else
+            ("token", "did") if platform in ("沸点", "博擎") else
             ("session_id",) if platform == "微橙" else ("x_token",))
 
 
 def fill_password_login(pg, platform, user, pw):
     """在登录页填账号密码并提交。返回 True 表示已提交。"""
     try:
-        if platform == "沸点":
+        if platform in ("沸点", "博擎"):
             pg.wait_for_selector("input.ant-input", timeout=15000)
             ins = pg.query_selector_all("input.ant-input")
             if len(ins) < 2:
