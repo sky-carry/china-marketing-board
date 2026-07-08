@@ -58,7 +58,7 @@ def grab(platform, tag):
                     for ck in ctx.cookies():
                         if ck["name"]=="td.token": g["token"]=ck["value"]
                         elif ck["name"]=="td-op-uid": g["op_uid"]=ck["value"]
-                        elif ck["name"]=="td.sid": g["sid"]=urllib.parse.quote(ck["value"],safe="")
+                        elif ck["name"]=="td.sid": g["sid"]=ck["value"]   # 保持浏览器原编码(s%3A...)，勿再 quote
             except Exception: pass
             if platform=="麦斯" and "signip" not in g:
                 try: g["signip"]=pg.evaluate("()=>localStorage.getItem('signip')||''") or ""

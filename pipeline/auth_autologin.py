@@ -132,6 +132,17 @@ def fill_password_login(pg, platform, user, pw):
     return False
 
 
+def _grab_xfj_cookies(ctx, g):
+    """从浏览器上下文读取小飞机 token/op_uid/sid；sid 保持浏览器原编码(s%3A...)，勿再 quote(否则双编码)。"""
+    try:
+        for ck in ctx.cookies():
+            if ck["name"] == "td.token": g["token"] = ck["value"]
+            elif ck["name"] == "td-op-uid": g["op_uid"] = ck["value"]
+            elif ck["name"] == "td.sid": g["sid"] = ck["value"]
+    except Exception:
+        pass
+
+
 def run(account_id, headless=True):
     c = psycopg2.connect(DSN); c.autocommit = True
     cur = c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -164,14 +175,7 @@ def run(account_id, headless=True):
             if all(k in g for k in need):
                 break
             trigger_data(pg, platform)
-            if platform == "小飞机" and "token" not in g:
-                try:
-                    for ck in ctx.cookies():
-                        if ck["name"] == "td.token": g["token"] = ck["value"]
-                        elif ck["name"] == "td-op-uid": g["op_uid"] = ck["value"]
-                        elif ck["name"] == "td.sid": g["sid"] = urllib.parse.quote(ck["value"], safe="")
-                except Exception:
-                    pass
+            if platform == "小飞机": _grab_xfj_cookies(ctx, g)
             if platform == "麦斯" and "signip" not in g:
                 try: g["signip"] = pg.evaluate("()=>localStorage.getItem('signip')||''") or ""
                 except Exception: pass
@@ -194,6 +198,7 @@ def run(account_id, headless=True):
                     if all(k in g for k in need):
                         break
                     trigger_data(pg, platform)
+                    if platform == "小飞机": _grab_xfj_cookies(ctx, g)   # 登录后 token/op_uid/sid 从 cookie 读
                     if platform == "麦斯" and "signip" not in g:
                         try: g["signip"] = pg.evaluate("()=>localStorage.getItem('signip')||''") or ""
                         except Exception: pass
