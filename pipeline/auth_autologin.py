@@ -25,7 +25,7 @@ ENTRY = {
     "微橙": "https://business.douyongtuan.com/#/tiktok",
     "麦斯": "https://ad.maxengine.cn/media_data/xhs",
 }
-PW_PLATFORMS = ("沸点", "微橙", "麦斯")  # 可纯密码自动登录
+PW_PLATFORMS = ("沸点", "微橙", "麦斯", "小飞机")  # 可纯密码自动登录(小飞机正常登录只需账号密码，验证码仅多次失败才触发)
 
 CLICK = ("(name)=>{let e=[...document.querySelectorAll('*')].filter(x=>x.children.length===0&&"
          "(x.textContent||'').trim()===name);e.sort((a,b)=>a.textContent.length-b.textContent.length);"
@@ -118,6 +118,14 @@ def fill_password_login(pg, platform, user, pw):
             pg.fill("input[placeholder='请输入登录账号']", user)
             pg.fill("input[placeholder='请输入登录密码']", pw)
             pg.evaluate(CLICK, "立即登录")
+            return True
+        elif platform == "小飞机":
+            pg.wait_for_selector("input[placeholder*='邮箱']", timeout=15000)
+            pg.fill("input[placeholder*='邮箱']", user)
+            pg.fill("input[placeholder*='密码']", pw)
+            try: pg.check("input[type=checkbox]", timeout=2000)   # 勾选隐私协议
+            except Exception: pass
+            pg.press("input[placeholder*='密码']", "Enter")        # 回车提交(页面多处"登录"字样，点击易歧义)
             return True
     except Exception as e:
         print("fill err:", repr(e)[:120], flush=True)
