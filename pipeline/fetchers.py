@@ -33,7 +33,7 @@ def load_logins(enabled_only=True):
     try:
         import psycopg2
         conn=psycopg2.connect(DSN); cur=conn.cursor()
-        q="SELECT platform,tag,auth,id FROM accounts"+(" WHERE enabled" if enabled_only else "")+" ORDER BY platform,tag"
+        q="SELECT platform,tag,auth,id FROM accounts"+(" WHERE enabled AND NOT COALESCE(is_historical,false)" if enabled_only else "")+" ORDER BY platform,tag"
         cur.execute(q)
         rows=[{"platform":r[0],"tag":r[1],"auth":dict(r[2]),"id":r[3]} for r in cur.fetchall()]
         conn.close()

@@ -48,7 +48,7 @@ def refresh_login(account_id, timeout=200):
 def keep_tokens_fresh(max_age_hours=6, only_expired=False):
     """定时保活：刷新过期或超过 max_age 的登录凭证（跳过已知需人工登录的小飞机 need_login）。"""
     conn=DB.connect(); cur=conn.cursor()
-    cur.execute("SELECT id,platform,tag,token_status,token_updated_at FROM accounts WHERE enabled")
+    cur.execute("SELECT id,platform,tag,token_status,token_updated_at FROM accounts WHERE enabled AND NOT COALESCE(is_historical,false)")
     rows=cur.fetchall(); conn.close()
     now=datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8)))
     done=[]

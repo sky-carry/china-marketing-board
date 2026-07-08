@@ -27,9 +27,10 @@
             <el-switch v-model="row.enabled" size="small" @change="v => toggle(row, v)" />
           </template>
         </el-table-column>
-        <el-table-column label="登录态" width="90">
+        <el-table-column label="登录态" width="100">
           <template #default="{ row }">
-            <el-tag :type="statusType(row.token_status)" size="small">{{ statusText(row.token_status) }}</el-tag>
+            <el-tag v-if="row.is_historical" type="info" size="small" effect="plain">历史账号</el-tag>
+            <el-tag v-else :type="statusType(row.token_status)" size="small">{{ statusText(row.token_status) }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="token_updated_at" label="登录刷新时间" min-width="165" align="center" />
@@ -42,12 +43,17 @@
             <span v-else style="color:#c0c4cc">暂无数据</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="300" fixed="right">
+        <el-table-column label="操作" width="380" fixed="right">
           <template #default="{ row }">
             <div class="op-btns">
-              <el-button size="small" type="primary" :loading="row._auto" @click="autoLogin(row)">自动登录</el-button>
-              <el-button size="small" :loading="row._logging" @click="refreshLogin(row)">手动登录</el-button>
+              <template v-if="!row.is_historical">
+                <el-button size="small" type="primary" :loading="row._auto" @click="autoLogin(row)">自动登录</el-button>
+                <el-button size="small" :loading="row._logging" @click="refreshLogin(row)">手动登录</el-button>
+              </template>
               <el-button size="small" @click="openEdit(row)">编辑</el-button>
+              <el-button size="small" :type="row.is_historical?'success':'info'" @click="toggleHistorical(row)">
+                {{ row.is_historical ? '恢复' : '设为历史' }}
+              </el-button>
               <el-button size="small" type="danger" @click="del(row)">删</el-button>
             </div>
           </template>
@@ -101,6 +107,12 @@ async function save() {
   dlg.value = false; ElMessage.success('已保存'); load()
 }
 async function toggle(row, v) { await api.put(`/accounts/${row.id}`, { enabled: v }) }
+async function toggleHistorical(row) {
+  const to = !row.is_historical
+  if (to) await ElMessageBox.confirm(`把 ${row.tag} 设为历史账号？将停止抓取并置于列表底部（已入库数据保留）`, '确认', { type: 'warning' })
+  await api.put(`/accounts/${row.id}`, { is_historical: to })
+  ElMessage.success(to ? '已设为历史账号' : '已恢复'); load()
+}
 async function del(row) {
   await ElMessageBox.confirm(`删除登录 ${row.tag}？（不会删已入库的历史数据）`, '确认', { type: 'warning' })
   await api.delete(`/accounts/${row.id}`); ElMessage.success('已删除'); load()

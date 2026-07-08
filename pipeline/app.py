@@ -260,11 +260,12 @@ def table(platforms:str=None, levels:str=None, start:str=None, end:str=None, lim
 def list_accounts():
     c=db(); cur=c.cursor()
     cur.execute("""SELECT a.id,a.platform,a.tag,a.enabled,a.token_status,a.token_updated_at,a.note,
-        a.username, (a.password IS NOT NULL AND a.password<>'') AS has_pw,
+        a.username, COALESCE(a.is_historical,false) AS is_historical,
+        (a.password IS NOT NULL AND a.password<>'') AS has_pw,
         (SELECT min(date) FROM ad_daily d WHERE d.login_account=a.tag) first_date,
         (SELECT max(date) FROM ad_daily d WHERE d.login_account=a.tag) last_date,
         (SELECT count(*) FROM ad_daily d WHERE d.login_account=a.tag) rows
-        FROM accounts a ORDER BY a.platform,a.tag""")
+        FROM accounts a ORDER BY COALESCE(a.is_historical,false), a.platform, a.tag""")
     rows=[dict(r) for r in cur.fetchall()]
     for r in rows:
         r["token_updated_at"]=fmt_dt(r["token_updated_at"])
@@ -298,7 +299,7 @@ def update_account(aid:int, body:dict=Body(...)):
         cur.execute("SELECT tag FROM accounts WHERE id=%s",(aid,)); r=cur.fetchone()
         old_tag=r["tag"] if r else None
     sets=[]; args=[]
-    for k in ("platform","tag","enabled","note","username","password"):
+    for k in ("platform","tag","enabled","note","username","password","is_historical"):
         if k in body: sets.append(f"{k}=%s"); args.append(body[k])
     if "auth" in body: sets.append("auth=%s"); args.append(psycopg2.extras.Json(body["auth"]))
     if sets:
@@ -469,6 +470,7 @@ def _ensure_tables():
         platform text, entity_id text, tags jsonb DEFAULT '[]',
         updated_at timestamptz DEFAULT now(), PRIMARY KEY(platform,entity_id))""")
     cur.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS daily_time text")  # 每日定时(HH:MM)，空则用 interval_minutes
+    cur.execute("ALTER TABLE accounts ADD COLUMN IF NOT EXISTS is_historical boolean DEFAULT false")  # 历史账号：不再抓取、列表置底
     # 登录账户表：默认种子账户 skg
     cur.execute("""CREATE TABLE IF NOT EXISTS auth_users (
         username text PRIMARY KEY, salt text, pw_hash text, updated_at timestamptz DEFAULT now())""")
