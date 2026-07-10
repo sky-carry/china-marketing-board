@@ -134,6 +134,39 @@ def fill_password_login(pg, platform, user, pw):
     return False
 
 
+def grab_cid_token(ctx, user, pw):
+    """小飞机 CID 素材系统(cid.smallfighter.com)独立登录，抓 Bearer token。
+    profile 已登录则直接抓；否则用账号密码登(CID 正常登录无短信)。返回 {cid_token,cid_op_uid} 或 {}。"""
+    g = {}
+    pg = ctx.new_page()
+    def on_req(req):
+        h = req.headers
+        if "cid.smallfighter.com/v1" in req.url and h.get("authorization", "").startswith("Bearer "):
+            g["cid_token"] = h["authorization"][7:]; g["cid_op_uid"] = h.get("td-op-uid", "")
+    pg.on("request", on_req)
+    try:
+        pg.goto("https://cid.smallfighter.com/#reportMaterial", timeout=60000)
+        pg.wait_for_timeout(3000)
+        if pg.query_selector("input[placeholder*='邮箱']") and user and pw:   # 显示登录页 -> 密码登录
+            try:
+                pg.fill("input[placeholder*='邮箱']", user); pg.fill("input[placeholder*='密码']", pw)
+                try: pg.check("input[type=checkbox]", timeout=2000)
+                except Exception: pass
+                pg.press("input[placeholder*='密码']", "Enter")
+            except Exception as e:
+                print("cid 填表 err", repr(e)[:80], flush=True)
+        for _ in range(10):
+            if "cid_token" in g: break
+            try: pg.goto("https://cid.smallfighter.com/#reportMaterial", timeout=30000)
+            except Exception: pass
+            pg.wait_for_timeout(1500)
+    except Exception as e:
+        print("cid grab err", repr(e)[:100], flush=True)
+    try: pg.close()
+    except Exception: pass
+    return g
+
+
 def _grab_xfj_cookies(ctx, g):
     """从浏览器上下文读取小飞机 token/op_uid/sid；sid 保持浏览器原编码(s%3A...)，勿再 quote(否则双编码)。"""
     try:
@@ -206,6 +239,15 @@ def run(account_id, headless=True):
                         except Exception: pass
                     time.sleep(2)
                 session_ok = all(k in g for k in need)
+
+        # 小飞机：额外抓 CID 素材系统 token（独立登录），供素材维度抓取
+        if platform == "小飞机" and session_ok:
+            try:
+                cid = grab_cid_token(ctx, user, pw)
+                if cid.get("cid_token"): g.update(cid); print("  + CID token 已获取", flush=True)
+                else: print("  ! CID token 未获取(不影响 td 维度)", flush=True)
+            except Exception as e:
+                print("  ! CID 抓取异常:", repr(e)[:100], flush=True)
 
         ctx.close()
 

@@ -106,6 +106,12 @@ def crawl_window(window_days=15, platform=None, mark_expired=True, auto_relogin=
                 r=f.result()
                 total+=r["rows"]; errs+=r["errs"]
                 if r["auth_fail"]: bad_logins.add(r["tag"])
+    # 平台迁移去重：删除迁走平台残留的重复账户行(小飞机→沸点等，见 docs/业务说明.md)
+    deduped=0
+    try:
+        conn=DB.connect(); deduped=DB.dedupe_migrated_accounts(conn); conn.close()
+    except Exception as e:
+        errs.append(f"dedupe: {repr(e)[:60]}")
     # 标记登录态
     if mark_expired:
         conn=DB.connect()
@@ -123,4 +129,4 @@ def crawl_window(window_days=15, platform=None, mark_expired=True, auto_relogin=
                 code,out=refresh_login(aid)
                 relogin.append({"tag":tag,"code":code,"msg":out.splitlines()[-1] if out else ""})
     return {"rows":total,"errors":len(errs),"bad_logins":list(bad_logins),
-            "relogin":relogin,"sample":errs[:5]}
+            "relogin":relogin,"sample":errs[:5],"deduped":deduped}

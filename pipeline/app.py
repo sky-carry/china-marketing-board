@@ -353,6 +353,8 @@ def _run_task(tid):
         res=crawl.crawl_window(window_days=t["window_days"] or 15, platform=t["platform"])
         st="ok" if res["errors"]==0 else "error"
         detail=f"写入{res['rows']}行" + (f"，失败{res['errors']}(登录失效:{res['bad_logins']})" if res["errors"] else "")
+        if res["errors"] and res.get("sample"):
+            detail += "；样例: " + " | ".join(res["sample"])[:600]
         rows=res["rows"]
     except Exception as e:
         st="error"; detail=repr(e)[:200]; rows=0

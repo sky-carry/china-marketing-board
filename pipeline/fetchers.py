@@ -73,6 +73,7 @@ def _first(it,keys):
         if k in it: return it.get(k)
     return None
 def fetch_xfj(login,level,day):
+    if level=="素材": return fetch_xfj_material(login,day)   # 素材走 CID 独立接口
     a=login["auth"]; cfg=XFJ_LEVELS[level]; M=1e6
     # 一个小飞机登录可挂多个「项目」，op_uid 即项目 ID；op_uids 有值则逐项目抓，否则退回单个 op_uid
     op_uids=[str(x) for x in (a.get("op_uids") or [a["op_uid"]])]
@@ -113,6 +114,45 @@ def fetch_xfj(login,level,day):
             "refund_rate":_r((_num(it.get('cid_refund_rate')) or 0)/100),
             "direct_orders":_i(it.get('adx_metric_323')),"direct_pay_amount":round(dpay,2),"direct_roi":_div(dpay,cost),
             "direct_real_orders":_i(it.get('cid_trans_direct_real_order_num')),"direct_real_pay_amount":round(drpay,2),"direct_real_roi":_div(drpay,cost)})
+    return out
+
+# 小飞机 CID 素材报表(cid.smallfighter.com，独立 Bearer token，与 td 分开登录)
+# 指标缩放同 td：金额÷1e6、rate÷100；cidm_metric_1/2/3/4 = 下单数/成交数/下单金额/成交金额
+XFJ_MAT_MET=["cost","impressions","adx_metric_0","click_rate","cpc","cpm","cidm_metric_1","cidm_metric_2","cidm_metric_3","cidm_metric_4"]
+def fetch_xfj_material(login,day):
+    a=login["auth"]; M=1e6
+    tok=a.get("cid_token"); op=str(a.get("cid_op_uid") or a.get("op_uid") or "")
+    if not tok: raise RuntimeError("小飞机CID token missing login(未登录CID)")
+    hdr={"authorization":"Bearer "+tok,"td-op-uid":op,"content-type":"application/json;charset=UTF-8",
+         "accept-encoding":"identity","user-agent":UA}
+    items=[]; page=1
+    while True:
+        data={"order":"cost|-1","WithRelateAccount":False,"IncludeAdxDeleted":True,"withRelateDerive":False,"All":True,
+              "createType":3,"type":0,"begindate":_ts(day),"enddate":_ts(day,True),"userIds":[],"WithRelateExternalId":False,
+              "WithMaterialAweme":True,"page":page,"limit":200,"findFolder":False,"includeSubFolder":False,"filterType":5,
+              "metrics":XFJ_MAT_MET,"level":13,"Type":3,"_type":"MATERIAL_REPORT","WithRelCampaign":False,"WithMaterialUrl":False}
+        body=json.dumps({"mid":page,"source":"td.web.vue","url":"/v1/material/listLimit","data":data}).encode()
+        req=urllib.request.Request("https://cid.smallfighter.com/v1/material/listLimit",data=body,headers=hdr,method="POST")
+        resp=json.loads(urllib.request.urlopen(req,timeout=60).read().decode("utf-8","replace"))
+        if resp.get("code")!=0:   # 非0多为登录态失效；含 token/login 关键字以触发自动重登
+            raise RuntimeError(f"小飞机CID material token expired login code={resp.get('code')} msg={resp.get('msg') or resp.get('message')}")
+        d=resp.get("data") or {}; its=d.get("items") or []
+        items+=its
+        if len(items)>=d.get("total",0) or not its: break
+        page+=1; time.sleep(0.1)
+    out=[]
+    for it in items:
+        cost=_num(it.get('cost'))
+        if not cost: continue
+        cost/=M; pay=(_num(it.get('cidm_metric_3')) or 0)/M; rpay=(_num(it.get('cidm_metric_4')) or 0)/M
+        out.append({"entity_id":str(it.get('_id')),"entity_name":it.get('Name'),
+            "account_id":"","account_name":None,"parent_id":None,"parent_name":None,"channel":"小飞机素材",
+            "cost":round(cost,2),"impressions":_i(it.get('impressions')),"clicks":_i(it.get('adx_metric_0')),
+            "ctr":_r((_num(it.get('click_rate')) or 0)/100),"cpm":_r((_num(it.get('cpm')) or 0)/M),"cpc":_r((_num(it.get('cpc')) or 0)/M),
+            "conversions":None,"conversion_cost":None,
+            "orders":_i(it.get('cidm_metric_1')),"pay_amount":round(pay,2),"roi":_div(pay,cost),
+            "real_pay_amount":round(rpay,2),"real_orders":_i(it.get('cidm_metric_2')),"real_roi":_div(rpay,cost),
+            "refund_rate":None})
     return out
 
 # ============================ 沸点 ============================
@@ -330,7 +370,7 @@ def fetch_fk(login,level,day):
     return out
 
 FETCH={"小飞机":fetch_xfj,"沸点":fetch_fd,"微橙":fetch_wc,"麦斯":fetch_ms,"方块":fetch_fk,"博擎":fetch_bq}
-LEVELS={"小飞机":list(XFJ_LEVELS),"沸点":list(FD_LEVELS),"微橙":list(WC_LEVELS),"麦斯":list(MS_LEVELS),"方块":["账户"],"博擎":list(BQ_LEVELS)}
+LEVELS={"小飞机":list(XFJ_LEVELS)+["素材"],"沸点":list(FD_LEVELS),"微橙":list(WC_LEVELS),"麦斯":list(MS_LEVELS),"方块":["账户"],"博擎":list(BQ_LEVELS)}
 
 def fetch(login,level,day):
     """返回归一化 dict 列表（含 platform/login_account/level/date）"""

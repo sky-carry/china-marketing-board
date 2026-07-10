@@ -25,7 +25,8 @@ def main():
     plat_arg=args[2] if len(args)>2 else "all"
     level_arg=args[3] if len(args)>3 else "all"
     login_arg=args[4] if len(args)>4 else "all"     # 按登录标识过滤(逗号分隔 tag)
-    logins=F.load_logins()
+    inc_all=len(args)>5 and args[5] not in ("","0","false","no")  # 第6参数=含历史/停用账号
+    logins=F.load_logins(enabled_only=not inc_all)
     if plat_arg!="all":
         want=set(plat_arg.split(",")); logins=[l for l in logins if l["platform"] in want]
     if login_arg!="all":

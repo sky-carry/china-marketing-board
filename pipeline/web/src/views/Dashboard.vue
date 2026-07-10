@@ -50,7 +50,6 @@
       <div class="kpi"><div class="t">真实付款(GSV)<el-tooltip :content="KPITIPS.real_pay_amount" placement="top" effect="dark" :show-after="80"><el-icon class="tip-q"><QuestionFilled /></el-icon></el-tooltip></div><div class="v">¥{{ fmt(kpi.real_pay_amount) }}</div></div>
       <div class="kpi"><div class="t">整体真实ROI<el-tooltip :content="KPITIPS.real_roi" placement="top" effect="dark" :show-after="80"><el-icon class="tip-q"><QuestionFilled /></el-icon></el-tooltip></div><div class="v">{{ kpi.real_roi ?? '-' }}</div></div>
       <div class="kpi"><div class="t">真实订单数<el-tooltip :content="KPITIPS.real_orders" placement="top" effect="dark" :show-after="80"><el-icon class="tip-q"><QuestionFilled /></el-icon></el-tooltip></div><div class="v">{{ fmt(kpi.real_orders) }}</div></div>
-      <div class="kpi"><div class="t">加权退款率<el-tooltip :content="KPITIPS.refund_rate" placement="top" effect="dark" :show-after="80"><el-icon class="tip-q"><QuestionFilled /></el-icon></el-tooltip></div><div class="v">{{ kpi.refund_rate ?? '-' }}%</div></div>
     </div>
 
     <div class="card grow">
