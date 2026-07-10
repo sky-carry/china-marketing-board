@@ -12,6 +12,7 @@
           <template #title><el-icon><Grid /></el-icon><span>平台明细</span></template>
           <el-menu-item v-for="p in platforms" :key="p" :index="`/platform/${p}`">{{ p }}</el-menu-item>
         </el-sub-menu>
+        <el-menu-item index="/orders"><el-icon><List /></el-icon><span>订单明细</span></el-menu-item>
         <el-menu-item index="/accounts"><el-icon><User /></el-icon><span>账号管理</span></el-menu-item>
         <el-menu-item index="/tasks"><el-icon><Timer /></el-icon><span>定时任务</span></el-menu-item>
       </el-menu>

@@ -350,12 +350,21 @@ def _run_task(tid):
     cur.execute("INSERT INTO runs (task_id,kind,status) VALUES (%s,%s,'running') RETURNING id",(tid,t["kind"]))
     rid=cur.fetchone()["id"]; c.close()
     try:
-        res=crawl.crawl_window(window_days=t["window_days"] or 15, platform=t["platform"])
+        wd=t["window_days"] or 15
+        res=crawl.crawl_window(window_days=wd, platform=t["platform"])
         st="ok" if res["errors"]==0 else "error"
         detail=f"写入{res['rows']}行" + (f"，失败{res['errors']}(登录失效:{res['bad_logins']})" if res["errors"] else "")
         if res["errors"] and res.get("sample"):
             detail += "；样例: " + " | ".join(res["sample"])[:600]
         rows=res["rows"]
+        # 订单同窗口滚动抓取（和广告数据同一节奏：当日1天/近15天）
+        try:
+            import order_fetchers as OF
+            ores=OF.crawl_orders_window(window_days=wd, platform=t["platform"])
+            detail += f"；订单{ores['orders']}单" + (f"(失效:{ores['bad_logins']})" if ores["errors"] else "")
+            if ores["errors"]: st="error"
+        except Exception as oe:
+            detail += f"；订单抓取异常:{repr(oe)[:80]}"; st="error"
     except Exception as e:
         st="error"; detail=repr(e)[:200]; rows=0
     c=db(); c.autocommit=True; cur=c.cursor()
@@ -574,6 +583,50 @@ async def adv_accounts_import(request: Request):
 
 @app.get("/api/health")
 def health(): return {"ok":True,"ts":str(datetime.datetime.now())}
+
+# ============================ 订单明细 API ============================
+_ORDER_SORTS={"pay_time","order_date","pay_amount","click_time","refund_time","product_price"}
+@app.get("/api/order_meta")
+def order_meta():
+    c=db(); cur=c.cursor()
+    cur.execute("SELECT DISTINCT platform FROM orders ORDER BY platform"); plats=[r["platform"] for r in cur.fetchall()]
+    cur.execute("SELECT DISTINCT platform,order_type FROM orders ORDER BY 1,2")
+    types={}
+    for r in cur.fetchall(): types.setdefault(r["platform"],[]).append(r["order_type"])
+    cur.execute("SELECT DISTINCT platform,login_account FROM orders ORDER BY 1,2")
+    logins={}
+    for r in cur.fetchall(): logins.setdefault(r["platform"],[]).append(r["login_account"])
+    cur.execute("SELECT min(order_date) mn, max(order_date) mx FROM orders"); rng=cur.fetchone()
+    c.close()
+    return {"platforms":plats,"types":types,"logins":logins,
+            "date_min":str(rng["mn"]) if rng["mn"] else None,"date_max":str(rng["mx"]) if rng["mx"] else None}
+
+@app.get("/api/orders")
+def orders(platform:str=None, login:str=None, order_type:str=None, start:str=None, end:str=None,
+           search:str=None, sort:str="pay_time", limit:int=50, offset:int=0):
+    cond=[]; args=[]
+    if platform: cond.append("platform=%s"); args.append(platform)
+    if login: cond.append("login_account=%s"); args.append(login)
+    if order_type: cond.append("order_type=%s"); args.append(order_type)
+    if start: cond.append("order_date>=%s"); args.append(start)
+    if end: cond.append("order_date<=%s"); args.append(end)
+    if search:
+        cond.append("(order_no ILIKE %s OR main_order_no ILIKE %s OR ad_account_name ILIKE %s OR product_info ILIKE %s)")
+        args += [f"%{search}%"]*4
+    w=" AND ".join(cond) or "true"
+    sort_col=sort if sort in _ORDER_SORTS else "pay_time"
+    c=db(); cur=c.cursor()
+    cur.execute(f"SELECT count(*) n, COALESCE(sum(pay_amount),0) amt FROM orders WHERE {w}", args)
+    agg=cur.fetchone()
+    cur.execute(f"SELECT * FROM orders WHERE {w} ORDER BY {sort_col} DESC NULLS LAST LIMIT %s OFFSET %s", args+[limit,offset])
+    rows=[dict(r) for r in cur.fetchall()]
+    for r in rows:
+        for k in ("click_time","pay_time","refund_time"): r[k]=str(r[k]) if r[k] else None
+        r["order_date"]=str(r["order_date"]) if r["order_date"] else None
+        r["fetched_at"]=fmt_dt(r.get("fetched_at"))
+        for k in ("product_price","pay_amount"): r[k]=float(r[k]) if r[k] is not None else None
+    c.close()
+    return {"total":agg["n"], "sum_pay":float(agg["amt"] or 0), "rows":rows}
 
 # ============================ 定时调度 ============================
 _sched_lock_conn=None   # 持有建议锁的专用连接（锁随连接存活；进程退出即释放）

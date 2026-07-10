@@ -72,8 +72,58 @@ def _first(it,keys):
     for k in keys:
         if k in it: return it.get(k)
     return None
+# 账户级(推广账号)改走 CID报表接口：v1/account/list 只含「广告管理」里的账户，会漏掉停投账户；
+# CID报表(cid.smallfighter.com)含所有账户(含停投)，是超集；Keys=["account_id"] 让服务器聚合成「一账户一行」。
+def fetch_xfj_account(login,day):
+    a=login["auth"]; M=1e6
+    op_uids=[str(x) for x in (a.get("op_uids") or [a["op_uid"]])]   # 逐项目抓
+    items=[]
+    for op_uid in op_uids:
+        cookie=f'lang=zhCN; td.token={a["token"]}; td-op-uid={op_uid}; td.sid={a["sid"]}'
+        hdr={'authorization':'Bearer '+a["token"],'content-type':'application/json; charset=UTF-8','cookie':cookie,
+             'td-op-uid':op_uid,'td-product':'cid','origin':'https://cid.smallfighter.com',
+             'referer':'https://cid.smallfighter.com/','accept-encoding':'identity','user-agent':UA}
+        got=[]; page=1
+        while True:
+            data={"order":"cost|-1","IsCid":True,"needMulProject":True,"Keys":["account_id"],
+              "userIds":[],"spaceBelongIds":[],"BeginDate":_ts(day),"EndDate":_ts(day,True),"TimeKeys":"",
+              "accountIds":[],"LabelKey":0,"channelIds":[],"ecpIds":[],"Type":155,"_type":"CID_REPORT",
+              "page":page,"limit":200,"metrics":XFJ_MET,"SelectedColumns":XFJ_MET,"Level":3,"AscribeKey":0,
+              "accountStatus":[],"adxSubIds":[],"isAggregateByUser":False,"isAggregateByBizType":False,
+              "isNotFilterDeletedAccount":False,"cidGoodIds":[],"CidBusinessIds":[],"CidOperationIds":[],
+              "NeedSpaceBelong":False,"NeedCidOperator":False}
+            body=json.dumps({"mid":page,"source":"td.web.vue","hash":"#/cid/report",
+                  "url":"/v1/cid/report/list","data":data}).encode()
+            req=urllib.request.Request('https://cid.smallfighter.com/v1/cid/report/list',data=body,headers=hdr,method='POST')
+            d=json.loads(urllib.request.urlopen(req,timeout=60).read())['data']
+            page_items=d.get('items') or []
+            got+=page_items
+            if len(got)>=d.get('total',0) or not page_items: break
+            page+=1; time.sleep(0.1)
+        items+=got
+    out=[]
+    for it in items:
+        cost=_num(it.get('cost'))
+        if not cost: continue
+        cost/=M; pay=(_num(it.get('cid_trans_payment_amount')) or 0)/M; rpay=(_num(it.get('cid_trans_real_payment_amount')) or 0)/M
+        dpay=(_num(it.get('adx_metric_326')) or 0)/M; drpay=(_num(it.get('cid_trans_direct_real_payment_amount')) or 0)/M
+        eid=str(it.get('AccountExternalId') or '')
+        out.append({"entity_id":eid,"entity_name":it.get('AccountName'),
+            "account_id":eid,"account_name":it.get('AccountName'),
+            "parent_id":None,"parent_name":None,"channel":it.get('ChannelName') or it.get('AdxName'),
+            "cost":round(cost,2),"impressions":_i(it.get('impressions')),"clicks":_i(it.get('adx_metric_0')),
+            "ctr":_r((_num(it.get('click_rate')) or 0)/100),"cpm":_r((_num(it.get('cpm')) or 0)/M),"cpc":_r((_num(it.get('cpc')) or 0)/M),
+            "conversions":_i(it.get('adx_metric_7')),"conversion_cost":_r((_num(it.get('convert_cost')) or 0)/M),
+            "orders":_i(it.get('cid_trans_order_num')),"pay_amount":round(pay,2),"roi":_div(pay,cost),
+            "real_pay_amount":round(rpay,2),"real_orders":_i(it.get('cid_trans_real_order_num')),"real_roi":_div(rpay,cost),
+            "refund_rate":_r((_num(it.get('cid_refund_rate')) or 0)/100),
+            "direct_orders":_i(it.get('adx_metric_323')),"direct_pay_amount":round(dpay,2),"direct_roi":_div(dpay,cost),
+            "direct_real_orders":_i(it.get('cid_trans_direct_real_order_num')),"direct_real_pay_amount":round(drpay,2),"direct_real_roi":_div(drpay,cost)})
+    return out
+
 def fetch_xfj(login,level,day):
     if level=="素材": return fetch_xfj_material(login,day)   # 素材走 CID 独立接口
+    if level=="推广账号": return fetch_xfj_account(login,day)  # 账户级走 CID报表(含停投账户)
     a=login["auth"]; cfg=XFJ_LEVELS[level]; M=1e6
     # 一个小飞机登录可挂多个「项目」，op_uid 即项目 ID；op_uids 有值则逐项目抓，否则退回单个 op_uid
     op_uids=[str(x) for x in (a.get("op_uids") or [a["op_uid"]])]
