@@ -40,7 +40,7 @@
         <div>
           <div class="lbl">日期范围</div>
           <el-date-picker v-model="sel.range" type="daterange" size="small" value-format="YYYY-MM-DD"
-            start-placeholder="开始" end-placeholder="结束" style="width:230px" @change="reload" />
+            :shortcuts="shortcuts" start-placeholder="开始" end-placeholder="结束" style="width:230px" @change="reload" />
         </div>
       </div>
     </div>
@@ -64,6 +64,7 @@ import { ref, reactive, onMounted, onBeforeUnmount, computed } from 'vue'
 import { QuestionFilled } from '@element-plus/icons-vue'
 import api from '../api'
 import * as echarts from 'echarts'
+import shortcuts from '../shortcuts'
 
 // 顶部 KPI 卡片的计算口径说明（悬浮 ? 显示）
 const KPITIPS = {

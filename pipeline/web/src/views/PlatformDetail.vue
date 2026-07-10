@@ -117,13 +117,7 @@ const columns = [
   { key:'refund_rate', label:'退款率(%)', width:100, type:'rate' },
 ]
 const firstCol = 'entity_name'
-const shortcuts = [
-  { text:'今天', value:()=>{const d=new Date();return [d,d]} },
-  { text:'昨天', value:()=>{const d=new Date(Date.now()-864e5);return [d,d]} },
-  { text:'近7天', value:()=>[new Date(Date.now()-6*864e5), new Date()] },
-  { text:'近30天', value:()=>[new Date(Date.now()-29*864e5), new Date()] },
-  { text:'本月', value:()=>{const n=new Date();return [new Date(n.getFullYear(),n.getMonth(),1), n]} },
-]
+import shortcuts from '../shortcuts'
 
 function fmt(v, type) {
   if (v === null || v === undefined || v === '') return type ? '0' : ''

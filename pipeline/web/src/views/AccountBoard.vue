@@ -126,12 +126,7 @@ function timeCell(row) {
   return mode.value === 'daily' ? row.date : rangeText.value
 }
 
-const shortcuts = [
-  { text:'今天', value:()=>{const d=new Date();return [d,d]} },
-  { text:'近7天', value:()=>[new Date(Date.now()-6*864e5), new Date()] },
-  { text:'近30天', value:()=>[new Date(Date.now()-29*864e5), new Date()] },
-  { text:'本月', value:()=>{const n=new Date();return [new Date(n.getFullYear(),n.getMonth(),1), n]} },
-]
+import shortcuts from '../shortcuts'
 const money = v => v==null?'0.00':Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})
 const int = v => v==null?'0':Math.round(Number(v)).toLocaleString()
 const rate = v => v==null?'0%':Number(v).toFixed(2)+'%'
@@ -171,6 +166,13 @@ const COLS = [
   { key:'direct_real_pay_amount', label:'直投成交金额(元)', width:130, type:'money', sortable:true },
   { key:'direct_real_orders',     label:'直投成交量',      width:100, type:'int',   sortable:true },
   { key:'direct_real_roi',        label:'直投成交ROI',     width:105, type:'roi',   sortable:true },
+  // 投放账户自定义属性（在「账号管理→投放账户管理」编辑），默认隐藏，可在自定义列勾选展示
+  { key:'category',      label:'类目',      width:90,  type:'text', hidden:true },
+  { key:'product',       label:'投放产品',  width:120, type:'text', hidden:true },
+  { key:'ecom_platform', label:'电商平台',  width:90,  type:'text', hidden:true },
+  { key:'ad_channel',    label:'投放渠道',  width:100, type:'text', hidden:true },
+  { key:'store',         label:'店铺',      width:90,  type:'text', hidden:true },
+  { key:'agency',        label:'代理商',    width:120, type:'text', hidden:true },
   { key:'tags',            label:'标签',        minWidth:160, type:'tags', pin:'right' },
 ]
 const COLMAP = Object.fromEntries(COLS.map(c => [c.key, c]))
@@ -195,14 +197,14 @@ const TIPS = {
 const colLabel = k => COLMAP[k]?.label || k
 const STORAGE = 'accountBoardCols.v1'
 
-function defaultState() { return COLS.map(c => ({ key: c.key, visible: true })) }
+function defaultState() { return COLS.map(c => ({ key: c.key, visible: !c.hidden })) }  // hidden 列默认不勾选
 function loadState() {
   try {
     const s = JSON.parse(localStorage.getItem(STORAGE))
     if (Array.isArray(s) && s.length) {
       const seen = new Set(s.map(x => x.key))
       const merged = s.filter(x => COLMAP[x.key])            // 丢弃已删除的列
-      for (const c of COLS) if (!seen.has(c.key)) merged.push({ key: c.key, visible: true })  // 补新增列
+      for (const c of COLS) if (!seen.has(c.key)) merged.push({ key: c.key, visible: !c.hidden })  // 补新增列(hidden 默认不显示)
       return merged
     }
   } catch {}

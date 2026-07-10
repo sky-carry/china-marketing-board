@@ -3,7 +3,7 @@
 运行: uvicorn app:app --host 0.0.0.0 --port 8000
 提供: 账号管理 / 数据查询(看板) / 任务&运行 / 登录刷新 API，并托管前端静态文件。"""
 import os, datetime, hashlib, hmac, base64, json, time, secrets, psycopg2, psycopg2.extras
-from fastapi import FastAPI, HTTPException, Body
+from fastapi import FastAPI, HTTPException, Body, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
@@ -425,6 +425,8 @@ def account_board(start:str=None, end:str=None, platform:str=None, search:str=No
     rows=[dict(r) for r in cur.fetchall()]
     cur.execute("SELECT platform,entity_id,tags FROM account_tags")
     tagmap={(r["platform"],r["entity_id"]):r["tags"] for r in cur.fetchall()}
+    cur.execute("SELECT * FROM account_meta")
+    metamap={r["entity_id"]:dict(r) for r in cur.fetchall()}
     # 汇总行：对当前筛选(全部账户/全部分页)整体聚合；比率列由合计重算，退款率=(Σ付款-Σ真实付款)/Σ付款
     cur.execute(f"SELECT {_TOTALS_SQL} FROM ad_daily WHERE {w}", args)
     totals=dict(cur.fetchone())
@@ -436,6 +438,8 @@ def account_board(start:str=None, end:str=None, platform:str=None, search:str=No
     def rnd(d):
         rnd_metrics(d)
         d["tags"]=tagmap.get((d["platform"],d["entity_id"]),[])
+        m=metamap.get(d["entity_id"]) or {}
+        for f in META_FIELDS: d[f]=m.get(f)
         return d
     return {"total":total,"rows":[rnd(r) for r in rows],"totals":rnd_metrics(totals)}
 
@@ -446,6 +450,127 @@ def set_account_tags(body:dict=Body(...)):
         ON CONFLICT(platform,entity_id) DO UPDATE SET tags=EXCLUDED.tags, updated_at=now()""",
         (body["platform"], body["entity_id"], psycopg2.extras.Json(body.get("tags",[]))))
     c.close(); return {"ok":True}
+
+# ============================ 投放账户管理(账户自定义属性) ============================
+# 6 个业务属性：类目/投放产品/电商平台/投放渠道/店铺/代理商，按 账户ID 存，供账户看板自定义列展示
+META_FIELDS=["category","product","ecom_platform","ad_channel","store","agency"]
+META_LABELS={"category":"类目","product":"投放产品","ecom_platform":"电商平台",
+             "ad_channel":"投放渠道","store":"店铺","agency":"代理商"}
+
+@app.get("/api/adv_accounts")
+def adv_accounts(search:str=None):
+    """投放账户列表(账户级去重 by entity_id) + 已填的自定义属性 + 各属性已有取值(供下拉候选)。"""
+    cond=["level = ANY(%s)","cost IS NOT NULL"]; args=[ACCOUNT_LEVELS]
+    if search: cond.append("(entity_name ILIKE %s OR entity_id ILIKE %s)"); args+=[f"%{search}%",f"%{search}%"]
+    w=" AND ".join(cond)
+    c=db(); cur=c.cursor()
+    cur.execute(f"""SELECT entity_id, max(entity_name) entity_name,
+        array_agg(DISTINCT platform) platforms, max(date) last_date, sum(cost) cost
+        FROM ad_daily WHERE {w} GROUP BY entity_id ORDER BY sum(cost) DESC NULLS LAST""", args)
+    rows=[dict(r) for r in cur.fetchall()]
+    cur.execute("SELECT * FROM account_meta")
+    meta={r["entity_id"]:dict(r) for r in cur.fetchall()}
+    for r in rows:
+        m=meta.get(r["entity_id"]) or {}
+        filled=sum(1 for f in META_FIELDS if m.get(f))
+        for f in META_FIELDS: r[f]=m.get(f)
+        r["filled"]=filled
+        r["complete"]=(filled==len(META_FIELDS))   # 六个全填才算完整
+        r["last_date"]=str(r["last_date"]) if r["last_date"] else None
+        r["cost"]=round(float(r["cost"]),2) if r["cost"] else 0
+    # 未填/不完整的排最前面(complete=False 在前)，其次按消耗降序
+    rows.sort(key=lambda r:(r["complete"], -r["cost"]))
+    # 每个字段已有的去重取值，前端做下拉候选
+    options={}
+    for f in META_FIELDS:
+        cur.execute(f"SELECT DISTINCT {f} v FROM account_meta WHERE {f} IS NOT NULL AND {f}<>'' ORDER BY v")
+        options[f]=[r["v"] for r in cur.fetchall()]
+    c.close()
+    return {"rows":rows,"options":options,"fields":[{"key":k,"label":META_LABELS[k]} for k in META_FIELDS]}
+
+@app.post("/api/account_meta")
+def set_account_meta(body:dict=Body(...)):
+    """保存单个账户的自定义属性(只更新传入的字段)。"""
+    eid=body.get("entity_id")
+    if not eid: raise HTTPException(400,"entity_id required")
+    cols=[f for f in META_FIELDS if f in body]
+    c=db(); c.autocommit=True; cur=c.cursor()
+    if cols:
+        vals=[ (body[f] or None) for f in cols ]
+        setc=",".join(f"{f}=EXCLUDED.{f}" for f in cols)
+        cur.execute(f"""INSERT INTO account_meta(entity_id,{','.join(cols)}) VALUES(%s,{','.join(['%s']*len(cols))})
+            ON CONFLICT(entity_id) DO UPDATE SET {setc}, updated_at=now()""", [eid]+vals)
+    c.close(); return {"ok":True}
+
+# 导出/导入 Excel（下发给用户离线填写 6 个属性，再导回）
+_EXPORT_COLS=[("entity_id","账户ID"),("entity_name","账户名称"),("platforms","平台")]+[(f,META_LABELS[f]) for f in META_FIELDS]
+
+@app.get("/api/adv_accounts/export")
+def adv_accounts_export():
+    import io, openpyxl
+    from urllib.parse import quote
+    from fastapi.responses import StreamingResponse
+    c=db(); cur=c.cursor()
+    cur.execute("""SELECT entity_id, max(entity_name) entity_name, array_agg(DISTINCT platform) platforms, sum(cost) cost
+        FROM ad_daily WHERE level = ANY(%s) AND cost IS NOT NULL GROUP BY entity_id
+        ORDER BY sum(cost) DESC NULLS LAST""",(ACCOUNT_LEVELS,))
+    rows=[dict(r) for r in cur.fetchall()]
+    cur.execute("SELECT * FROM account_meta"); meta={r["entity_id"]:dict(r) for r in cur.fetchall()}
+    c.close()
+    # 未填的排前面，方便用户优先填
+    for r in rows:
+        m=meta.get(r["entity_id"]) or {}
+        r["_filled"]=sum(1 for f in META_FIELDS if m.get(f))
+        r["_meta"]=m
+    rows.sort(key=lambda r:(r["_filled"]==len(META_FIELDS), -(r["cost"] or 0)))
+    wb=openpyxl.Workbook(); ws=wb.active; ws.title="投放账户"
+    ws.append([lbl for _,lbl in _EXPORT_COLS])
+    for r in rows:
+        line=[]
+        for key,_ in _EXPORT_COLS:
+            if key=="platforms": line.append("/".join(r["platforms"] or []))
+            elif key in META_FIELDS: line.append(r["_meta"].get(key) or "")
+            else: line.append(str(r.get(key) or ""))
+        ws.append(line)
+    ws.column_dimensions["A"].width=20; ws.column_dimensions["B"].width=34
+    for row in ws.iter_rows(min_row=2,min_col=1,max_col=1):   # 账户ID 列设文本，防长数字被 Excel 变科学计数
+        for cell in row: cell.number_format="@"
+    buf=io.BytesIO(); wb.save(buf); buf.seek(0)
+    fn=quote("投放账户属性表.xlsx")
+    return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{fn}"})
+
+@app.post("/api/adv_accounts/import")
+async def adv_accounts_import(request: Request):
+    import io, openpyxl
+    data=await request.body()   # 前端直接把 .xlsx 二进制作为请求体发来(避免依赖 python-multipart)
+    if not data: raise HTTPException(400,"未收到文件")
+    try:
+        wb=openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+    except Exception as e:
+        raise HTTPException(400, "无法解析文件，请上传导出的 .xlsx："+repr(e)[:80])
+    ws=wb.active; allrows=list(ws.iter_rows(values_only=True))
+    if not allrows: return {"updated":0,"detail":"空文件"}
+    header=[str(h).strip() if h is not None else "" for h in allrows[0]]
+    lbl2f={META_LABELS[f]:f for f in META_FIELDS}
+    idx_id=next((i for i,h in enumerate(header) if h in ("账户ID","账户id","entity_id")), None)
+    field_idx={lbl2f[h]:i for i,h in enumerate(header) if h in lbl2f}
+    if idx_id is None: raise HTTPException(400,"未找到「账户ID」列，请用导出的模板填写")
+    if not field_idx: raise HTTPException(400,"未找到可导入的属性列(类目/投放产品/…)")
+    def _eid(v):
+        if isinstance(v,float) and v.is_integer(): return str(int(v))   # Excel 把长数字读成 float 的兜底
+        return str(v).strip()
+    c=db(); c.autocommit=True; cur=c.cursor(); updated=0
+    cols=list(field_idx.keys()); setc=",".join(f"{f}=EXCLUDED.{f}" for f in cols)
+    for r in allrows[1:]:
+        if idx_id>=len(r) or r[idx_id] in (None,""): continue
+        eid=_eid(r[idx_id])
+        vals=[ (str(r[i]).strip() if i<len(r) and r[i] not in (None,"") else None) for i in (field_idx[f] for f in cols) ]
+        if not any(vals): continue   # 整行属性都空的账户跳过，不创建空记录
+        cur.execute(f"""INSERT INTO account_meta(entity_id,{','.join(cols)}) VALUES(%s,{','.join(['%s']*len(cols))})
+            ON CONFLICT(entity_id) DO UPDATE SET {setc}, updated_at=now()""", [eid]+vals)
+        updated+=1
+    c.close(); return {"updated":updated}
 
 @app.get("/api/health")
 def health(): return {"ok":True,"ts":str(datetime.datetime.now())}
@@ -473,6 +598,11 @@ def _ensure_tables():
     cur.execute("""CREATE TABLE IF NOT EXISTS account_tags (
         platform text, entity_id text, tags jsonb DEFAULT '[]',
         updated_at timestamptz DEFAULT now(), PRIMARY KEY(platform,entity_id))""")
+    # 投放账户自定义属性(按 账户ID/entity_id 存，跨平台共享；供账户看板自定义列展示)
+    cur.execute("""CREATE TABLE IF NOT EXISTS account_meta (
+        entity_id text PRIMARY KEY,
+        category text, product text, ecom_platform text, ad_channel text, store text, agency text,
+        updated_at timestamptz DEFAULT now())""")
     cur.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS daily_time text")  # 每日定时(HH:MM)，空则用 interval_minutes
     cur.execute("ALTER TABLE accounts ADD COLUMN IF NOT EXISTS is_historical boolean DEFAULT false")  # 历史账号：不再抓取、列表置底
     # 登录账户表：默认种子账户 skg

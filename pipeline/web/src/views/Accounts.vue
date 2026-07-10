@@ -1,5 +1,7 @@
 <template>
   <div class="page">
+    <el-tabs v-model="tab" class="acct-tabs">
+    <el-tab-pane label="账号管理" name="login">
     <div class="card grow">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
         <span style="color:#909399;font-size:13px">
@@ -61,6 +63,11 @@
       </el-table>
       </div>
     </div>
+    </el-tab-pane>
+    <el-tab-pane label="投放账户管理" name="adv">
+      <AdvAccounts />
+    </el-tab-pane>
+    </el-tabs>
 
     <el-dialog v-model="dlg" :title="form.id?'编辑登录':'新增登录'" width="460">
       <el-form label-width="90">
@@ -88,7 +95,9 @@
 import { ref, reactive, onMounted } from 'vue'
 import api from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import AdvAccounts from './AdvAccounts.vue'
 
+const tab = ref('login')
 const rows = ref([]); const loading = ref(false); const keeping = ref(false)
 const dlg = ref(false)
 const form = reactive({ id: null, platform: '小飞机', tag: '', username: '', password: '', note: '' })
@@ -151,4 +160,8 @@ onMounted(load)
 /* 操作列四个按钮一行排列，去掉 Element 默认的按钮间距只保留 gap */
 .op-btns { display: flex; flex-wrap: nowrap; gap: 6px; }
 .op-btns :deep(.el-button + .el-button) { margin-left: 0; }
+/* 让 tab 内容撑满高度，表格可用 height:100% */
+.acct-tabs { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.acct-tabs :deep(.el-tabs__content) { flex: 1 1 auto; min-height: 0; }
+.acct-tabs :deep(.el-tab-pane) { height: 100%; display: flex; flex-direction: column; }
 </style>
