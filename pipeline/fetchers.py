@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """四平台各维度抓取器：给定 (login, level, date) 返回归一化到统一指标的行列表。
 统一指标字段见 DBCOLS。只返回当天有消耗(cost>0)的行。"""
-import json, os, time, datetime, urllib.request, urllib.parse
+import json, os, time, datetime, urllib.request, urllib.parse, threading
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
@@ -252,6 +252,26 @@ def fetch_fd_legacy(login,level,day):
         page+=1; time.sleep(0.1)
     return _fd_rows(art, items)
 
+# 沸点官方API有调用频率限制(code=42901 apiKey调用超限)。生产是多线程并发抓取,
+# 8个线程同时打同一个key会瞬间超限。故全局串行化+最小间隔,超限则退避重试。
+_FD_LOCK = threading.Lock()
+_FD_LAST = [0.0]
+_FD_MIN_GAP = 2.0          # 相邻沸点API调用最小间隔(秒)
+def _fd_api_post(url, body, hdr):
+    """串行+限速+42901退避 的沸点API请求。返回解析后的 resp dict。"""
+    for attempt in range(6):
+        with _FD_LOCK:      # 序列化: 同一时刻只允许一个沸点API请求在飞
+            gap = _FD_MIN_GAP - (time.time() - _FD_LAST[0])
+            if gap > 0: time.sleep(gap)
+            req = urllib.request.Request(url, data=body, headers=hdr, method="POST")
+            resp = json.loads(urllib.request.urlopen(req, timeout=60).read().decode("utf-8","replace"))
+            _FD_LAST[0] = time.time()
+        if resp.get("code") == 42901 and attempt < 5:   # 限流: 递增等待后重试(锁外sleep,不阻塞其它线程判断)
+            time.sleep(50 + attempt*25)                 # 50,75,100,125,150s
+            continue
+        return resp
+    return resp
+
 def fetch_fd_api(login,level,day):
     """沸点官方开放API：Bearer 令牌（稳定，不依赖登录态）。字段/单位与网页接口一致；direct/间接须 customizeFields。"""
     a=login["auth"]; art=FD_LEVELS[level]
@@ -260,10 +280,9 @@ def fetch_fd_api(login,level,day):
     while True:
         b=json.dumps({"adReportType":art,"startDate":ds,"endDate":ds,"current":page,"pageSize":200,
                       "customizeFields":FD_API_FIELDS}).encode()
-        req=urllib.request.Request("https://api.fifay.cn/fifay-ad/report/union/get",data=b,headers=hdr,method="POST")
-        resp=json.loads(urllib.request.urlopen(req,timeout=60).read().decode("utf-8","replace"))
+        resp=_fd_api_post("https://api.fifay.cn/fifay-ad/report/union/get", b, hdr)
         code=resp.get("code")
-        if code!=200:   # 40001=令牌过期(含 token/expired 关键字以便判为鉴权错误)
+        if code!=200:   # 40001=令牌过期(含 token/expired 关键字以便判为鉴权错误); 42901退避后仍超限也会到这
             raise RuntimeError(f"沸点API {'token expired login' if code==40001 else 'error'} code={code} msg={resp.get('message')}")
         d=resp.get("data") or {}
         items+=d.get("list") or []
