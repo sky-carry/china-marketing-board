@@ -18,7 +18,7 @@
         </div>
         <div>
           <div class="lbl">登录账号</div>
-          <el-select v-model="login" size="small" style="width:190px" clearable filterable placeholder="全部账号" @change="reload">
+          <el-select v-model="login" size="small" style="width:180px" clearable filterable placeholder="全部账号" @change="reload">
             <el-option label="全部账号" value="" />
             <el-option v-for="l in loginOptions" :key="l" :label="l" :value="l" />
           </el-select>
@@ -30,10 +30,11 @@
         </div>
         <div>
           <div class="lbl">搜索 订单号/账号/商品</div>
-          <el-input v-model="search" size="small" style="width:200px" clearable placeholder="回车搜索"
+          <el-input v-model="search" size="small" style="width:180px" clearable placeholder="回车搜索"
             @keyup.enter="reload" @clear="reload" />
         </div>
         <el-button size="small" type="primary" @click="reload">查询</el-button>
+        <el-button size="small" @click="openColDlg"><el-icon style="margin-right:4px"><Operation /></el-icon>自定义列</el-button>
         <span style="color:#909399;font-size:12px">共 {{ total.toLocaleString() }} 单 · 付款合计 ¥{{ money(sumPay) }}</span>
       </div>
     </div>
@@ -42,30 +43,16 @@
       <div class="table-wrap">
         <el-table :data="rows" size="small" border v-loading="loading" height="100%" @sort-change="onSort">
           <el-table-column type="index" label="#" width="46" :index="i=>i+1+(page-1)*pageSize" fixed="left" />
-          <el-table-column prop="platform" label="平台" width="70" fixed="left" />
-          <el-table-column prop="order_type" label="订单类型" width="110" fixed="left" show-overflow-tooltip />
-          <el-table-column prop="ad_account_name" label="广告账号名称" min-width="180" show-overflow-tooltip />
-          <el-table-column prop="ad_account_id" label="广告账号ID" width="150" show-overflow-tooltip />
-          <el-table-column prop="ad_name" label="广告名称" min-width="180" show-overflow-tooltip />
-          <el-table-column prop="material_name" label="视频素材名称" min-width="160" show-overflow-tooltip />
-          <el-table-column prop="main_order_no" label="主订单号" width="170" show-overflow-tooltip />
-          <el-table-column prop="order_no" label="订单号" width="200" show-overflow-tooltip />
-          <el-table-column prop="product_info" label="商品信息" min-width="240" show-overflow-tooltip />
-          <el-table-column prop="product_price" label="商品单价" width="95" align="right">
-            <template #default="{row}">{{ row.product_price==null?'—':money(row.product_price) }}</template></el-table-column>
-          <el-table-column prop="pay_amount" label="付款金额" width="100" align="right" sortable="custom">
-            <template #default="{row}">{{ row.pay_amount==null?'—':money(row.pay_amount) }}</template></el-table-column>
-          <el-table-column prop="order_status" label="订单状态" width="90" />
-          <el-table-column prop="callback_status" label="回传" width="80" show-overflow-tooltip />
-          <el-table-column prop="click_time" label="点击时间" width="150" sortable="custom" />
-          <el-table-column prop="pay_time" label="付款时间" width="150" sortable="custom" />
-          <el-table-column prop="refund_time" label="退款时间" width="150" />
-          <el-table-column prop="attribution" label="归因" width="70" />
-          <el-table-column prop="ad_position" label="广告投放位置" width="120" show-overflow-tooltip />
-          <!-- 人工列 B-G（后续填） -->
-          <el-table-column prop="category" label="类目" width="90"><template #default="{row}">{{ row.category||'—' }}</template></el-table-column>
-          <el-table-column prop="product" label="投放产品" width="100"><template #default="{row}">{{ row.product||'—' }}</template></el-table-column>
-          <el-table-column prop="shop" label="店铺" width="110"><template #default="{row}">{{ row.shop||'—' }}</template></el-table-column>
+          <el-table-column v-for="col in visibleColumns" :key="col.key" :prop="col.key" :label="col.label"
+            :width="col.width" :min-width="col.minWidth" :fixed="col.fixed"
+            :sortable="col.sortable ? 'custom' : false"
+            :align="col.type==='money' ? 'right' : 'left'"
+            :show-overflow-tooltip="col.type!=='money'">
+            <template #default="{ row }">
+              <span v-if="col.type==='money'">{{ row[col.key]==null?'—':money(row[col.key]) }}</span>
+              <span v-else :class="{ 'bg-empty': col.bg && !row[col.key] }">{{ row[col.key]==null||row[col.key]===''?(col.bg?'—':''):row[col.key] }}</span>
+            </template>
+          </el-table-column>
         </el-table>
       </div>
       <div class="pager">
@@ -74,6 +61,24 @@
           @current-change="p=>{page=p;load()}" @size-change="s=>{pageSize=s;page=1;load()}" />
       </div>
     </div>
+
+    <!-- 自定义列 弹窗 -->
+    <el-dialog v-model="colDlg" title="自定义列" width="360">
+      <div style="color:#909399;font-size:12px;margin-bottom:10px">勾选控制显示/隐藏，拖动 <b>⣿</b> 调整列顺序。B-G列在账户看板按广告账号配置后自动带出。</div>
+      <div class="col-list">
+        <div v-for="(c,i) in draft" :key="c.key" class="col-item" :class="{dragging:dragIdx===i}"
+          draggable="true" @dragstart="dragStart(i)" @dragover.prevent="dragOver(i)" @drop.prevent @dragend="dragEnd">
+          <span class="drag-handle" title="拖动排序">⣿</span>
+          <el-checkbox v-model="c.visible">{{ colLabel(c.key) }}<el-tag v-if="COLMAP[c.key]?.bg" size="small" type="warning" effect="plain" style="margin-left:6px">人工</el-tag></el-checkbox>
+        </div>
+      </div>
+      <template #footer>
+        <el-button size="small" @click="resetCols">恢复默认</el-button>
+        <span style="flex:1"></span>
+        <el-button size="small" @click="colDlg=false">取消</el-button>
+        <el-button size="small" type="primary" @click="applyCols">应用</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -81,8 +86,9 @@
 import { ref, computed, onMounted } from 'vue'
 import api from '../api'
 import shortcuts from '../shortcuts'
+import { Operation } from '@element-plus/icons-vue'
 
-const meta = ref({ platforms: [], types: {}, logins: {}, date_min: null, date_max: null })
+const meta = ref({ platforms: [], types: {}, logins: {} })
 const platforms = computed(() => meta.value.platforms || [])
 const platform = ref(''); const orderType = ref(''); const login = ref(''); const range = ref(null); const search = ref('')
 const rows = ref([]); const total = ref(0); const sumPay = ref(0)
@@ -97,6 +103,73 @@ const loginOptions = computed(() => {
   return platform.value ? (l[platform.value] || []) : [...new Set(Object.values(l).flat())]
 })
 const money = v => v==null?'0.00':Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})
+
+// ============ 列定义 & 自定义列 ============
+const COLS = [
+  { key:'platform',        label:'平台',        width:70,  fixed:'left' },
+  { key:'order_type',      label:'订单类型',    width:110, fixed:'left' },
+  { key:'ad_account_name', label:'广告账号名称', minWidth:180 },
+  { key:'ad_account_id',   label:'广告账号ID',  width:150 },
+  { key:'ad_name',         label:'广告名称',    minWidth:180 },
+  { key:'material_name',   label:'视频素材名称', minWidth:160 },
+  { key:'main_order_no',   label:'主订单号',    width:170 },
+  { key:'order_no',        label:'订单号',      width:200 },
+  { key:'product_info',    label:'商品信息',    minWidth:240 },
+  { key:'product_price',   label:'商品单价',    width:95,  type:'money' },
+  { key:'pay_amount',      label:'付款金额',    width:100, type:'money', sortable:true },
+  { key:'order_status',    label:'订单状态',    width:90 },
+  { key:'callback_status', label:'回传',        width:80 },
+  { key:'click_time',      label:'点击时间',    width:150, sortable:true },
+  { key:'pay_time',        label:'付款时间',    width:150, sortable:true },
+  { key:'refund_time',     label:'退款时间',    width:150 },
+  { key:'attribution',     label:'归因',        width:70 },
+  { key:'ad_position',     label:'广告投放位置', width:120 },
+  // B-G 人工列（账户看板配置 → 按广告账号ID绑定）
+  { key:'category',        label:'类目',        width:100, bg:true },
+  { key:'product',         label:'投放产品',    width:110, bg:true },
+  { key:'ecom_platform',   label:'电商平台',    width:100, bg:true },
+  { key:'ad_channel',      label:'投放渠道',    width:100, bg:true },
+  { key:'store',           label:'店铺',        width:120, bg:true },
+  { key:'agency',          label:'代理商',      width:100, bg:true },
+]
+const COLMAP = Object.fromEntries(COLS.map(c => [c.key, c]))
+const colLabel = k => COLMAP[k]?.label || k
+const STORAGE = 'ordersCols.v1'
+function defaultState() { return COLS.map(c => ({ key: c.key, visible: true })) }
+function loadState() {
+  try {
+    const s = JSON.parse(localStorage.getItem(STORAGE))
+    if (Array.isArray(s) && s.length) {
+      const seen = new Set(s.map(x => x.key))
+      const merged = s.filter(x => COLMAP[x.key])
+      for (const c of COLS) if (!seen.has(c.key)) merged.push({ key: c.key, visible: true })
+      return merged
+    }
+  } catch {}
+  return defaultState()
+}
+const colState = ref(loadState())
+function saveState() { localStorage.setItem(STORAGE, JSON.stringify(colState.value)) }
+const visibleColumns = computed(() => {
+  const vis = colState.value.filter(c => c.visible).map(c => COLMAP[c.key]).filter(Boolean)
+  let leading = true
+  return vis.map((c, i) => {
+    let fixed
+    if (c.fixed === 'left' && leading) fixed = 'left'
+    if (c.fixed !== 'left') leading = false
+    return { ...c, fixed }
+  })
+})
+const colDlg = ref(false); const draft = ref([]); const dragIdx = ref(-1)
+function openColDlg() { draft.value = colState.value.map(x => ({ ...x })); colDlg.value = true }
+function dragStart(i) { dragIdx.value = i }
+function dragOver(i) {
+  if (dragIdx.value === -1 || dragIdx.value === i) return
+  const arr = draft.value; const [m] = arr.splice(dragIdx.value, 1); arr.splice(i, 0, m); dragIdx.value = i
+}
+function dragEnd() { dragIdx.value = -1 }
+function applyCols() { colState.value = draft.value.map(x => ({ ...x })); saveState(); colDlg.value = false }
+function resetCols() { draft.value = defaultState() }
 
 async function load() {
   loading.value = true
@@ -120,3 +193,13 @@ onMounted(async () => {
   load()
 })
 </script>
+
+<style scoped>
+.bg-empty { color: #c0c4cc; }
+.col-list { max-height: 400px; overflow-y: auto; }
+.col-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid #ebeef5;
+  border-radius: 6px; margin-bottom: 6px; background: #fff; }
+.col-item.dragging { opacity: .5; border-color: #409EFF; background: #ecf5ff; }
+.drag-handle { cursor: grab; color: #c0c4cc; font-size: 14px; user-select: none; letter-spacing: -2px; }
+.col-item:hover .drag-handle { color: #909399; }
+</style>

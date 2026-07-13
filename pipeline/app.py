@@ -620,11 +620,19 @@ def orders(platform:str=None, login:str=None, order_type:str=None, start:str=Non
     agg=cur.fetchone()
     cur.execute(f"SELECT * FROM orders WHERE {w} ORDER BY {sort_col} DESC NULLS LAST LIMIT %s OFFSET %s", args+[limit,offset])
     rows=[dict(r) for r in cur.fetchall()]
+    # B-G 人工列：按广告账号ID 绑定 account_meta（在账户看板配置）
+    ids=list({r["ad_account_id"] for r in rows if r.get("ad_account_id")})
+    metamap={}
+    if ids:
+        cur.execute(f"SELECT entity_id,{','.join(META_FIELDS)} FROM account_meta WHERE entity_id = ANY(%s)",(ids,))
+        metamap={r["entity_id"]:dict(r) for r in cur.fetchall()}
     for r in rows:
         for k in ("click_time","pay_time","refund_time"): r[k]=str(r[k]) if r[k] else None
         r["order_date"]=str(r["order_date"]) if r["order_date"] else None
         r["fetched_at"]=fmt_dt(r.get("fetched_at"))
         for k in ("product_price","pay_amount"): r[k]=float(r[k]) if r[k] is not None else None
+        m=metamap.get(r.get("ad_account_id")) or {}
+        for f in META_FIELDS: r[f]=m.get(f)   # 用 account_meta 覆盖(orders表自身B-G列忽略)
     c.close()
     return {"total":agg["n"], "sum_pay":float(agg["amt"] or 0), "rows":rows}
 
