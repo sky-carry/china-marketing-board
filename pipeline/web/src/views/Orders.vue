@@ -187,9 +187,9 @@ function onSort({ prop, order }) { if (order) { sort.value = prop; reload() } }
 
 onMounted(async () => {
   try { const { data } = await api.get('/order_meta'); meta.value = data } catch {}
-  const n = new Date(); const first = new Date(n.getFullYear(), n.getMonth(), 1)
+  const n = new Date()
   const f = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
-  range.value = [f(first), f(n)]
+  range.value = [f(n), f(n)]   // 默认当天
   load()
 })
 </script>
