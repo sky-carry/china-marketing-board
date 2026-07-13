@@ -259,13 +259,15 @@ def table(platforms:str=None, levels:str=None, start:str=None, end:str=None, lim
 @app.get("/api/accounts")
 def list_accounts():
     c=db(); cur=c.cursor()
+    # 一次 GROUP BY 聚合 ad_daily 再 JOIN，避免每账号 3 个关联子查询(全表扫多次)导致慢
     cur.execute("""SELECT a.id,a.platform,a.tag,a.enabled,a.token_status,a.token_updated_at,a.note,
         a.username, COALESCE(a.is_historical,false) AS is_historical,
         (a.password IS NOT NULL AND a.password<>'') AS has_pw,
-        (SELECT min(date) FROM ad_daily d WHERE d.login_account=a.tag) first_date,
-        (SELECT max(date) FROM ad_daily d WHERE d.login_account=a.tag) last_date,
-        (SELECT count(*) FROM ad_daily d WHERE d.login_account=a.tag) rows
-        FROM accounts a ORDER BY COALESCE(a.is_historical,false), a.platform, a.tag""")
+        s.first_date, s.last_date, COALESCE(s.rows,0) AS rows
+        FROM accounts a
+        LEFT JOIN (SELECT login_account, min(date) first_date, max(date) last_date, count(*) rows
+                   FROM ad_daily GROUP BY login_account) s ON s.login_account=a.tag
+        ORDER BY COALESCE(a.is_historical,false), a.platform, a.tag""")
     rows=[dict(r) for r in cur.fetchall()]
     for r in rows:
         r["token_updated_at"]=fmt_dt(r["token_updated_at"])
@@ -557,7 +559,14 @@ async def adv_accounts_import(request: Request):
     try:
         wb=openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
     except Exception as e:
-        raise HTTPException(400, "无法解析文件，请上传导出的 .xlsx："+repr(e)[:80])
+        # 诊断: 合法xlsx应以 PK\x03\x04(504b0304) 开头; 非PK说明文件在上传前已被破坏(如被安全软件加密/被转码)
+        head=data[:16]
+        hint=""
+        if head[:2]!=b'PK':
+            try: txt=head.decode('utf-8','replace')
+            except: txt=""
+            hint=f"｜收到 {len(data)} 字节, 头部={head.hex()} ({txt!r}), 非zip → 文件在上传前已损坏(疑被终端安全软件加密), 不是本系统能修的"
+        raise HTTPException(400, "无法解析文件，请上传导出的 .xlsx："+repr(e)[:60]+hint)
     ws=wb.active; allrows=list(ws.iter_rows(values_only=True))
     if not allrows: return {"updated":0,"detail":"空文件"}
     header=[str(h).strip() if h is not None else "" for h in allrows[0]]
