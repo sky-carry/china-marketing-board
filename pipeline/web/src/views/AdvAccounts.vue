@@ -18,7 +18,7 @@
       </div>
     </div>
     <div class="table-wrap">
-      <el-table :data="rows" size="small" border v-loading="loading" height="100%">
+      <el-table :data="pagedRows" size="small" border v-loading="loading" height="100%">
         <el-table-column label="状态" width="78" fixed="left">
           <template #default="{ row }">
             <el-tag v-if="row.complete" type="success" size="small" effect="plain">完整</el-tag>
@@ -42,6 +42,11 @@
         </el-table-column>
       </el-table>
     </div>
+    <div class="pager">
+      <el-pagination background layout="total, sizes, prev, pager, next" :total="rows.length"
+        :page-size="pageSize" :current-page="page" :page-sizes="[20,50,100,200]"
+        @current-change="p=>page=p" @size-change="s=>{pageSize=s;page=1}" />
+    </div>
   </div>
 </template>
 
@@ -54,15 +59,19 @@ import { Download, Upload } from '@element-plus/icons-vue'
 const rows = ref([]); const fields = ref([]); const options = ref({})
 const loading = ref(false); const search = ref('')
 const exporting = ref(false); const importing = ref(false); const fileInput = ref(null)
+const page = ref(1); const pageSize = ref(20)
 
 const completeCount = computed(() => rows.value.filter(r => r.complete).length)
 const incompleteCount = computed(() => rows.value.length - completeCount.value)
+// 仅渲染当前页(每页 el-select 数量 = 页大小×6)，避免一次渲染上千个下拉导致卡顿
+const pagedRows = computed(() => { const s = (page.value - 1) * pageSize.value; return rows.value.slice(s, s + pageSize.value) })
 
 async function load() {
   loading.value = true
   try {
     const { data } = await api.get('/adv_accounts', { params: { search: search.value || undefined } })
     rows.value = data.rows; fields.value = data.fields; options.value = data.options || {}
+    page.value = 1
   } finally { loading.value = false }
 }
 async function save(row, key, val) {
