@@ -645,6 +645,68 @@ def orders(platform:str=None, login:str=None, order_type:str=None, start:str=Non
     c.close()
     return {"total":agg["n"], "sum_pay":float(agg["amt"] or 0), "rows":rows}
 
+# 订单导出列(顺序与前端订单明细一致)
+_ORDER_EXPORT_COLS=[
+    ("platform","平台"),("order_type","订单类型"),
+    ("ad_account_name","广告账号名称"),("ad_account_id","广告账号ID"),
+    ("ad_name","广告名称"),("material_name","视频素材名称"),
+    ("main_order_no","主订单号"),("order_no","订单号"),("product_id","商品ID"),
+    ("product_info","商品信息"),("product_price","商品单价"),("pay_amount","付款金额"),
+    ("order_status","订单状态"),("callback_status","回传"),
+    ("click_time","点击时间"),("pay_time","付款时间"),("refund_time","退款时间"),
+    ("attribution","归因"),("ad_position","广告投放位置"),
+]+[(f,META_LABELS[f]) for f in META_FIELDS]
+_TEXTFMT_COLS={"ad_account_id","main_order_no","order_no","product_id"}   # 长数字设文本,防Excel科学计数
+
+@app.get("/api/orders/export")
+def orders_export(platform:str=None, login:str=None, order_type:str=None, start:str=None, end:str=None,
+                  search:str=None, sort:str="pay_time"):
+    """导出当前筛选的订单为 xlsx(全部匹配行,不分页)。筛选口径与 /api/orders 完全一致。"""
+    import io, openpyxl
+    from urllib.parse import quote
+    from fastapi.responses import StreamingResponse
+    cond=[]; args=[]
+    if platform: cond.append("platform=%s"); args.append(platform)
+    if login: cond.append("login_account=%s"); args.append(login)
+    if order_type: cond.append("order_type=%s"); args.append(order_type)
+    if start: cond.append("order_date>=%s"); args.append(start)
+    if end: cond.append("order_date<=%s"); args.append(end)
+    if search:
+        cond.append("(order_no ILIKE %s OR main_order_no ILIKE %s OR ad_account_name ILIKE %s OR product_info ILIKE %s)")
+        args += [f"%{search}%"]*4
+    w=" AND ".join(cond) or "true"
+    sort_col=sort if sort in _ORDER_SORTS else "pay_time"
+    c=db(); cur=c.cursor()
+    cur.execute(f"SELECT * FROM orders WHERE {w} ORDER BY {sort_col} DESC NULLS LAST", args)
+    rows=[dict(r) for r in cur.fetchall()]
+    ids=list({r["ad_account_id"] for r in rows if r.get("ad_account_id")})
+    metamap={}
+    if ids:
+        cur.execute(f"SELECT entity_id,{','.join(META_FIELDS)} FROM account_meta WHERE entity_id = ANY(%s)",(ids,))
+        metamap={r["entity_id"]:dict(r) for r in cur.fetchall()}
+    c.close()
+    wb=openpyxl.Workbook(); ws=wb.active; ws.title="订单明细"
+    ws.append([lbl for _,lbl in _ORDER_EXPORT_COLS])
+    def cell(r,key):
+        if key in META_FIELDS:
+            m=metamap.get(r.get("ad_account_id")) or {}; return m.get(key) or ""
+        v=r.get(key)
+        if v is None: return ""
+        if key in ("product_price","pay_amount"): return float(v)          # 数值
+        if key in ("click_time","pay_time","refund_time","order_date"): return str(v)
+        return str(v)
+    for r in rows:
+        ws.append([cell(r,k) for k,_ in _ORDER_EXPORT_COLS])
+    # 长数字列设文本格式,防科学计数
+    for ci,(k,_) in enumerate(_ORDER_EXPORT_COLS, start=1):
+        if k in _TEXTFMT_COLS:
+            for row in ws.iter_rows(min_row=2, min_col=ci, max_col=ci):
+                for c2 in row: c2.number_format="@"
+    buf=io.BytesIO(); wb.save(buf); buf.seek(0)
+    fn=quote("订单明细.xlsx")
+    return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{fn}"})
+
 # ============================ 定时调度 ============================
 _sched_lock_conn=None   # 持有建议锁的专用连接（锁随连接存活；进程退出即释放）
 def _acquire_scheduler_lock():

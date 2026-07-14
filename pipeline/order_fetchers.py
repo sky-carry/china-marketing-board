@@ -15,7 +15,7 @@ from fetchers import UA, _num, _ts
 ORDER_COLS = [
     "platform", "login_account", "order_type",          # 来源平台 / 我方登录 / 订单类型(小飞机分两种)
     "ad_account_name", "ad_account_id", "ad_name", "material_name",  # I~L
-    "main_order_no", "order_no",                          # M,N (order_no 为主键一部分)
+    "main_order_no", "order_no", "product_id",            # M,N (order_no 为主键一部分), N后新增商品ID
     "product_info", "product_price", "pay_amount",        # O,P,Q
     "order_status", "callback_status",                    # R,S
     "click_time", "pay_time", "refund_time",              # T,U,V
@@ -42,16 +42,18 @@ def _row(**kw):
     return r
 
 # ============================ 小飞机 CID 订单 ============================
+_XFJ_STATUS = {"0": "无效归因", "1": "待付款", "2": "已付款", "3": "已退款",
+               "4": "拆单", "5": "已完成", "6": "已付定金"}   # validCode -> 中文；未知保留原值
 XFJ_ORDER_TYPES = {
     "京东联盟PRO": {"url": "/v1/cid/order/jdCidList", "_type": "CID_JDCID_ORDER_REPORT", "level": 133, "Type": 133,
                  "extra": {"TracePoints": [], "AdxIds": []},
                  "cols": ["OrderUid", "OrderId", "OrderParentId", "AccountExtId", "AccountName", "CampaignName",
-                          "CreativeName", "GoodInfos", "Order.skuName", "Order.price", "Order.cosPrice",
+                          "ClickAdxMid3Name", "GoodInfos", "Order.skuName", "Order.skuId", "Order.price", "Order.cosPrice",
                           "OrderTime", "PayTime", "RefundTime", "ClickTime", "ClickAdxCSiteName", "TracePoint"]},
     "流量通PRO": {"url": "/v1/cid/order/lltProList", "_type": "CID_LLTPRO_ORDER_REPORT", "level": 129, "Type": 120,
                 "extra": {"AttributionTypes": []},
                 "cols": ["SubOrderId", "SellerNick", "AdxAccountId", "AccountName", "AdxCampaignId", "CampaignName",
-                         "GoodInfos", "Payment", "Status", "OrderTime", "PayTime", "PayOrderType"]},
+                         "ClickAdxMid3Name", "GoodInfos", "Order.item_id", "Payment", "Status", "OrderTime", "PayTime", "PayOrderType"]},
 }
 
 def _xfj_hdr(a, op):
@@ -81,24 +83,38 @@ def fetch_xfj_orders(login, day):
             items = d.get("items") or []
             for it in items:
                 o = it.get("Order") or {}
+                # 点击时间在嵌套 Click/Impression 子对象里
+                ck = (it.get("Click") or {}).get("clickTime") or (it.get("Impression") or {}).get("clickTime") or it.get("ClickTime")
                 if otype == "流量通PRO":     # 淘宝订单：金额在 Order 子对象，单位分÷100
                     ap = _num(o.get("actual_pay_fee")); pay = ap / 100 if ap is not None else None
                     pf = _num(o.get("pay_fee")); price = pf / 100 if pf is not None else None
                     product = o.get("pay_item_name") or o.get("item_name")
-                    status = str(o.get("order_status") or it.get("Status") or "")
+                    status = _XFJ_STATUS.get(str(o.get("order_status") or it.get("Status") or ""), str(o.get("order_status") or it.get("Status") or ""))
+                    pid = str(o.get("item_id") or o.get("pay_item_id") or "") or None   # 淘宝商品id
                 else:                        # 京东联盟PRO：金额单位元
                     pay = _num(o.get("cosPrice")); price = _num(o.get("price"))
                     product = o.get("skuName") or it.get("GoodInfos")
-                    status = str(it.get("Status") or o.get("validCode") or "")
+                    vc = str(it.get("Status") or o.get("validCode") or "")
+                    status = _XFJ_STATUS.get(vc, vc)   # validCode 2=已付款
+                    pid = str(o.get("skuId") or it.get("OrderGoodExtId") or "") or None  # 京东商品SKU id
+                # 回传状态：有成功回传记录=回传成功；被扣量/无记录=未回传
+                conv = it.get("ConvHistory") or []
+                if any(isinstance(cc, dict) and cc.get("ResponseSuc") for cc in conv):
+                    callback = "回传成功"
+                elif it.get("AdConvAbortN") or it.get("AdConvAbortCause"):
+                    callback = "未回传(扣量)"
+                else:
+                    callback = "未回传"
                 out.append(_row(
                     platform="小飞机", login_account=login["tag"], order_type=otype,
                     ad_account_name=it.get("AccountName"), ad_account_id=str(it.get("AccountExtId") or it.get("AdxAccountId") or ""),
-                    ad_name=it.get("CampaignName"), material_name=it.get("CreativeName"),
+                    ad_name=it.get("CampaignName"), material_name=it.get("ClickAdxMid3Name") or it.get("CreativeName"),
                     main_order_no=str(it.get("OrderParentId") or o.get("parentId") or "") or None,
                     order_no=str(it.get("OrderId") or it.get("SubOrderId") or o.get("orderId") or ""),
+                    product_id=pid,
                     product_info=product, product_price=price, pay_amount=pay,
-                    order_status=status, callback_status=None,
-                    click_time=_dt(it.get("ClickTime")), pay_time=_dt(it.get("PayTime") or o.get("payTime")),
+                    order_status=status, callback_status=callback,
+                    click_time=_dt(ck), pay_time=_dt(it.get("PayTime") or o.get("payTime")),
                     refund_time=_dt(it.get("RefundTime")),
                     attribution=str(it.get("TracePoint") or it.get("AttrType") or o.get("tracePoint") or "") or None,
                     ad_position=it.get("ClickAdxCSiteName")))
@@ -162,6 +178,7 @@ def fetch_wc_orders(login, day):
                 ad_name=pd.get("promotion_name") or pd.get("name"),
                 material_name=md.get("material_name") or str(it.get("material_id") or "") or None,
                 main_order_no=str(it.get("trade_parent_id") or ""), order_no=str(it.get("trade_id") or ""),
+                product_id=str(it.get("item_id") or "") or None,
                 product_info=it.get("item_title"), product_price=_num(it.get("item_price")),
                 pay_amount=_num(it.get("alipay_total_price")),
                 order_status=str(it.get("order_status") or it.get("tk_status") or ""),
@@ -176,7 +193,7 @@ def fetch_wc_orders(login, day):
 
 # ============================ 麦斯 聚光平台 淘宝-流量通Pro 订单 ============================
 MS_ORDER_FIELDS = ["order_id", "sub_order_id", "advertiser_id", "advertiser_name", "campaign_name", "unit_name",
-    "creativity_name", "material_id", "pay_item_name", "item_name", "order_status_title", "actual_pay_fee",
+    "creativity_name", "material_id", "pay_item_id", "pay_item_name", "item_name", "order_status_title", "actual_pay_fee",
     "conv_status_title", "click_time", "order_pay_time", "order_refund_time", "attribution_type", "order_create_time"]
 
 def fetch_ms_orders(login, day):
@@ -199,6 +216,7 @@ def fetch_ms_orders(login, day):
                 ad_account_name=it.get("advertiser_name"), ad_account_id=str(it.get("advertiser_id") or ""),
                 ad_name=it.get("unit_name") or it.get("campaign_name"), material_name=it.get("creativity_name"),
                 main_order_no=str(it.get("order_id") or ""), order_no=str(it.get("sub_order_id") or it.get("order_id") or ""),
+                product_id=str(it.get("pay_item_id") or "") or None,   # 下单商品id
                 product_info=it.get("pay_item_name") or it.get("item_name"), product_price=None,
                 pay_amount=_num(it.get("actual_pay_fee")),
                 order_status=it.get("order_status_title"), callback_status=it.get("conv_status_title"),
@@ -235,7 +253,7 @@ def ensure_orders_table(conn):
         cur.execute("""CREATE TABLE IF NOT EXISTS orders (
             platform text, login_account text, order_type text, order_date date,
             ad_account_name text, ad_account_id text, ad_name text, material_name text,
-            main_order_no text, order_no text,
+            main_order_no text, order_no text, product_id text,
             product_info text, product_price numeric, pay_amount numeric,
             order_status text, callback_status text,
             click_time timestamp, pay_time timestamp, refund_time timestamp,
@@ -243,6 +261,7 @@ def ensure_orders_table(conn):
             category text, product text, ecom_platform text, channel text, shop text, agency text,
             fetched_at timestamptz DEFAULT now(),
             PRIMARY KEY (platform, order_type, order_no))""")
+        cur.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS product_id text")  # 存量表补列
         cur.execute("CREATE INDEX IF NOT EXISTS idx_orders_platform_date ON orders(platform, order_date)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_orders_login ON orders(login_account)")
     conn.commit()

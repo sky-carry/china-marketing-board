@@ -35,6 +35,7 @@
         </div>
         <el-button size="small" type="primary" @click="reload">查询</el-button>
         <el-button size="small" @click="openColDlg"><el-icon style="margin-right:4px"><Operation /></el-icon>自定义列</el-button>
+        <el-button size="small" type="success" plain @click="exportXlsx" :loading="exporting"><el-icon style="margin-right:4px"><Download /></el-icon>导出数据</el-button>
         <span style="color:#909399;font-size:12px">共 {{ total.toLocaleString() }} 单 · 付款合计 ¥{{ money(sumPay) }}</span>
       </div>
     </div>
@@ -86,7 +87,8 @@
 import { ref, computed, onMounted } from 'vue'
 import api from '../api'
 import shortcuts from '../shortcuts'
-import { Operation } from '@element-plus/icons-vue'
+import { Operation, Download } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 
 const meta = ref({ platforms: [], types: {}, logins: {} })
 const platforms = computed(() => meta.value.platforms || [])
@@ -114,6 +116,7 @@ const COLS = [
   { key:'material_name',   label:'视频素材名称', minWidth:160 },
   { key:'main_order_no',   label:'主订单号',    width:170 },
   { key:'order_no',        label:'订单号',      width:200 },
+  { key:'product_id',      label:'商品ID',      width:150 },
   { key:'product_info',    label:'商品信息',    minWidth:240 },
   { key:'product_price',   label:'商品单价',    width:95,  type:'money' },
   { key:'pay_amount',      label:'付款金额',    width:100, type:'money', sortable:true },
@@ -182,6 +185,20 @@ async function load() {
   } finally { loading.value = false }
 }
 function reload() { page.value = 1; load() }
+
+const exporting = ref(false)
+async function exportXlsx() {   // 导出当前筛选的全部订单为 xlsx(与查询同口径,不分页)
+  exporting.value = true
+  try {
+    const res = await api.get('/orders/export', { responseType: 'blob', timeout: 300000, params: {
+      platform: platform.value||undefined, order_type: orderType.value||undefined, login: login.value||undefined,
+      start: range.value?.[0], end: range.value?.[1], search: search.value||undefined, sort: sort.value }})
+    const url = URL.createObjectURL(res.data)
+    const a = document.createElement('a'); a.href = url; a.download = '订单明细.xlsx'; a.click()
+    URL.revokeObjectURL(url)
+    ElMessage.success('导出成功')
+  } catch (e) { ElMessage.error('导出失败：' + (e?.message || e)) } finally { exporting.value = false }
+}
 function onPlat() { orderType.value = ''; login.value = ''; reload() }
 function onSort({ prop, order }) { if (order) { sort.value = prop; reload() } }
 
