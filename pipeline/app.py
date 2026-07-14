@@ -172,6 +172,9 @@ _METRIC_SQL = ",".join(f"{e} {k}" for k,e in _DETAIL_METRICS.items())
 # 汇总行专用聚合：退款率 = (Σ付款 − Σ真实付款)/Σ付款，其余同 _DETAIL_METRICS
 _TOTALS_OVERRIDE = {"refund_rate": "(SUM(pay_amount)-SUM(real_pay_amount))*100.0/NULLIF(SUM(pay_amount),0)"}
 _TOTALS_SQL = ",".join(f"{_TOTALS_OVERRIDE.get(k, e)} {k}" for k,e in _DETAIL_METRICS.items())
+# 实时真实付款的「已付款类」订单状态(与前端订单明细 PAID_STATUSES 保持一致)：
+# 已付款/已完成(小飞机)、支付(麦斯)、订单付款(微橙)、已结算(沸点)、成交(通用)；退款/失效/拆单/待付款 不计
+_PAID_STATUS_RE = "(已付款|已完成|订单付款|支付|成交|已结算)"
 
 @app.get("/api/detail")
 def detail(platform:str, level:str, login:str=None, start:str=None, end:str=None,
@@ -441,18 +444,43 @@ def account_board(start:str=None, end:str=None, platform:str=None, search:str=No
     # 汇总行：对当前筛选(全部账户/全部分页)整体聚合；比率列由合计重算，退款率=(Σ付款-Σ真实付款)/Σ付款
     cur.execute(f"SELECT {_TOTALS_SQL} FROM ad_daily WHERE {w}", args)
     totals=dict(cur.fetchone())
+    # 实时真实付款：口径与订单明细的「是否当天真实付款」完全一致(点击=付款同日 且 状态属已付款类)，来自 orders 表
+    # 已付款类状态：已付款/已完成(小飞机) 支付(麦斯) 订单付款(微橙) 已结算(沸点) 成交(通用)；退款/失效/拆单/待付款 不计
+    ocond=["o.pay_time IS NOT NULL","o.click_time IS NOT NULL","o.pay_time::date=o.click_time::date","o.order_status ~ %s"]
+    oargs=[_PAID_STATUS_RE]
+    if platform: ocond.append("o.platform=%s"); oargs.append(platform)
+    if start: ocond.append("o.pay_time::date>=%s"); oargs.append(start)
+    if end: ocond.append("o.pay_time::date<=%s"); oargs.append(end)
+    ow=" AND ".join(ocond)
+    odatesel="o.pay_time::date::text AS d, " if daily else ""
+    ogrp="o.platform,o.ad_account_id"+(",o.pay_time::date" if daily else "")
+    cur.execute(f"SELECT o.platform, o.ad_account_id, {odatesel} SUM(o.pay_amount) rtpay FROM orders o WHERE {ow} GROUP BY {ogrp}", oargs)
+    rtmap={}
+    for r in cur.fetchall():
+        k=(r["platform"],r["ad_account_id"])+((r["d"],) if daily else ())
+        rtmap[k]=float(r["rtpay"] or 0)
+    # 合计行的实时真实付款：限定在当前筛选的账户集合内(与表格口径一致)
+    cur.execute(f"SELECT COALESCE(SUM(o.pay_amount),0) rtpay FROM orders o WHERE {ow} AND o.ad_account_id IN (SELECT DISTINCT entity_id FROM ad_daily WHERE {w})", oargs+args)
+    tot_rtpay=float(cur.fetchone()["rtpay"] or 0)
     c.close()
     def rnd_metrics(d):
         for k in _DETAIL_METRICS:
             if d.get(k) is not None: d[k]=round(float(d[k]),2)
+        return d
+    def add_rt(d, rtpay):
+        d["rt_real_pay"]=round(rtpay,2)
+        cost=float(d.get("cost") or 0)
+        d["rt_real_roi"]=round(rtpay/cost,2) if cost else 0
         return d
     def rnd(d):
         rnd_metrics(d)
         d["tags"]=tagmap.get((d["platform"],d["entity_id"]),[])
         m=metamap.get(d["entity_id"]) or {}
         for f in META_FIELDS: d[f]=m.get(f)
+        k=(d["platform"],d["entity_id"])+((d["date"],) if daily else ())
+        add_rt(d, rtmap.get(k,0.0))
         return d
-    return {"total":total,"rows":[rnd(r) for r in rows],"totals":rnd_metrics(totals)}
+    return {"total":total,"rows":[rnd(r) for r in rows],"totals":add_rt(rnd_metrics(totals), tot_rtpay)}
 
 @app.post("/api/account_tags")
 def set_account_tags(body:dict=Body(...)):
@@ -578,23 +606,38 @@ async def adv_accounts_import(request: Request):
     def _eid(v):
         if isinstance(v,float) and v.is_integer(): return str(int(v))   # Excel 把长数字读成 float 的兜底
         return str(v).strip()
-    c=db(); c.autocommit=True; cur=c.cursor(); updated=0
+    c=db(); c.autocommit=True; cur=c.cursor(); updated=0; skipped=0; skipped_ids=[]
+    cur.execute("SELECT DISTINCT entity_id FROM ad_daily WHERE level = ANY(%s)", (ACCOUNT_LEVELS,))
+    valid_ids={row["entity_id"] for row in cur.fetchall()}   # 系统里真实存在的账户ID(账户级)
     cols=list(field_idx.keys()); setc=",".join(f"{f}=EXCLUDED.{f}" for f in cols)
     for r in allrows[1:]:
         if idx_id>=len(r) or r[idx_id] in (None,""): continue
         eid=_eid(r[idx_id])
         vals=[ (str(r[i]).strip() if i<len(r) and r[i] not in (None,"") else None) for i in (field_idx[f] for f in cols) ]
         if not any(vals): continue   # 整行属性都空的账户跳过，不创建空记录
+        if eid not in valid_ids:      # 只导入系统真实存在的账户ID，未知ID跳过并计数
+            skipped+=1
+            if len(skipped_ids)<10: skipped_ids.append(eid)
+            continue
         cur.execute(f"""INSERT INTO account_meta(entity_id,{','.join(cols)}) VALUES(%s,{','.join(['%s']*len(cols))})
             ON CONFLICT(entity_id) DO UPDATE SET {setc}, updated_at=now()""", [eid]+vals)
         updated+=1
-    c.close(); return {"updated":updated}
+    c.close(); return {"updated":updated,"skipped":skipped,"skipped_ids":skipped_ids}
 
 @app.get("/api/health")
 def health(): return {"ok":True,"ts":str(datetime.datetime.now())}
 
 # ============================ 订单明细 API ============================
 _ORDER_SORTS={"pay_time","order_date","pay_amount","click_time","refund_time","product_price"}
+def _order_meta_filter(cond, args, category, product, ecom_platform, ad_channel, store, agency):
+    """按投放账户 6 属性(值来自 account_meta，按 ad_account_id 关联)筛选订单。"""
+    mc=[]; ma=[]
+    for f,v in (("category",category),("product",product),("ecom_platform",ecom_platform),
+                ("ad_channel",ad_channel),("store",store),("agency",agency)):
+        if v: mc.append(f"{f}=%s"); ma.append(v)
+    if mc:
+        cond.append("ad_account_id IN (SELECT entity_id FROM account_meta WHERE "+" AND ".join(mc)+")")
+        args.extend(ma)
 @app.get("/api/order_meta")
 def order_meta():
     c=db(); cur=c.cursor()
@@ -606,13 +649,21 @@ def order_meta():
     logins={}
     for r in cur.fetchall(): logins.setdefault(r["platform"],[]).append(r["login_account"])
     cur.execute("SELECT min(order_date) mn, max(order_date) mx FROM orders"); rng=cur.fetchone()
+    # 6 个投放属性(类目/投放产品/…)的可选值，来自 account_meta，供订单页筛选下拉
+    mopts={}
+    for f in META_FIELDS:
+        cur.execute(f"SELECT DISTINCT {f} v FROM account_meta WHERE {f} IS NOT NULL AND {f}<>'' ORDER BY v")
+        mopts[f]=[r["v"] for r in cur.fetchall()]
     c.close()
     return {"platforms":plats,"types":types,"logins":logins,
+            "meta_options":mopts,"meta_fields":[{"key":k,"label":META_LABELS[k]} for k in META_FIELDS],
             "date_min":str(rng["mn"]) if rng["mn"] else None,"date_max":str(rng["mx"]) if rng["mx"] else None}
 
 @app.get("/api/orders")
 def orders(platform:str=None, login:str=None, order_type:str=None, start:str=None, end:str=None,
-           search:str=None, sort:str="pay_time", limit:int=50, offset:int=0):
+           search:str=None, category:str=None, product:str=None, ecom_platform:str=None,
+           ad_channel:str=None, store:str=None, agency:str=None,
+           sort:str="pay_time", limit:int=50, offset:int=0):
     cond=[]; args=[]
     if platform: cond.append("platform=%s"); args.append(platform)
     if login: cond.append("login_account=%s"); args.append(login)
@@ -622,6 +673,7 @@ def orders(platform:str=None, login:str=None, order_type:str=None, start:str=Non
     if search:
         cond.append("(order_no ILIKE %s OR main_order_no ILIKE %s OR ad_account_name ILIKE %s OR product_info ILIKE %s)")
         args += [f"%{search}%"]*4
+    _order_meta_filter(cond, args, category, product, ecom_platform, ad_channel, store, agency)
     w=" AND ".join(cond) or "true"
     sort_col=sort if sort in _ORDER_SORTS else "pay_time"
     c=db(); cur=c.cursor()
@@ -660,7 +712,8 @@ _TEXTFMT_COLS={"ad_account_id","main_order_no","order_no","product_id"}   # 长�
 
 @app.get("/api/orders/export")
 def orders_export(platform:str=None, login:str=None, order_type:str=None, start:str=None, end:str=None,
-                  search:str=None, sort:str="pay_time"):
+                  search:str=None, category:str=None, product:str=None, ecom_platform:str=None,
+                  ad_channel:str=None, store:str=None, agency:str=None, sort:str="pay_time"):
     """导出当前筛选的订单为 xlsx(全部匹配行,不分页)。筛选口径与 /api/orders 完全一致。"""
     import io, openpyxl
     from urllib.parse import quote
@@ -674,6 +727,7 @@ def orders_export(platform:str=None, login:str=None, order_type:str=None, start:
     if search:
         cond.append("(order_no ILIKE %s OR main_order_no ILIKE %s OR ad_account_name ILIKE %s OR product_info ILIKE %s)")
         args += [f"%{search}%"]*4
+    _order_meta_filter(cond, args, category, product, ecom_platform, ad_channel, store, agency)
     w=" AND ".join(cond) or "true"
     sort_col=sort if sort in _ORDER_SORTS else "pay_time"
     c=db(); cur=c.cursor()

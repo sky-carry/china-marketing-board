@@ -3,9 +3,15 @@
   <router-view v-if="isLogin" />
   <!-- 主界面 -->
   <el-container v-else style="height:100%">
-    <el-aside width="200px" style="background:#20222a">
-      <div style="color:#fff;font-size:16px;font-weight:600;padding:18px 20px;letter-spacing:1px">📊 投放数据平台</div>
-      <el-menu :default-active="$route.fullPath" router background-color="#20222a" text-color="#c6cad4" active-text-color="#409EFF">
+    <el-aside :width="isCollapse ? '64px' : '200px'" style="background:#20222a;transition:width .2s">
+      <div class="side-head" :class="{ collapsed: isCollapse }">
+        <span v-show="!isCollapse" class="side-title">📊 投放数据平台</span>
+        <el-icon class="collapse-btn" :title="isCollapse ? '展开侧栏' : '收起侧栏'" @click="toggleCollapse">
+          <Expand v-if="isCollapse" /><Fold v-else />
+        </el-icon>
+      </div>
+      <el-menu :default-active="$route.fullPath" router :collapse="isCollapse" :collapse-transition="false"
+        background-color="#20222a" text-color="#c6cad4" active-text-color="#409EFF">
         <el-menu-item index="/dashboard"><el-icon><TrendCharts /></el-icon><span>数据看板</span></el-menu-item>
         <el-menu-item index="/account-board"><el-icon><DataBoard /></el-icon><span>账户看板</span></el-menu-item>
         <el-sub-menu index="platforms">
@@ -56,6 +62,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 
 const route = useRoute(); const router = useRouter()
 const platforms = ref(['小飞机', '沸点', '微橙', '麦斯'])
+const isCollapse = ref(localStorage.getItem('sidebarCollapse') === '1')   // 侧栏收缩(记忆上次状态)
+function toggleCollapse() { isCollapse.value = !isCollapse.value; localStorage.setItem('sidebarCollapse', isCollapse.value ? '1' : '0') }
 const isLogin = computed(() => route.path === '/login')
 const username = ref(localStorage.getItem('authUser') || 'skg')
 const headerTitle = computed(() => route.params.name ? `平台明细 · ${route.params.name}` : route.meta.title)
@@ -84,3 +92,13 @@ onMounted(async () => {
   try { const { data } = await api.get('/meta'); if (data.platforms?.length) platforms.value = data.platforms } catch {}
 })
 </script>
+
+<style scoped>
+.side-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 16px; }
+.side-head.collapsed { justify-content: center; padding: 16px 0; }
+.side-title { color: #fff; font-size: 16px; font-weight: 600; letter-spacing: 1px; white-space: nowrap; overflow: hidden; }
+.collapse-btn { color: #c6cad4; font-size: 18px; cursor: pointer; flex: none; }
+.collapse-btn:hover { color: #409EFF; }
+/* 折叠态：菜单收成 64px 窄条，图标居中 */
+.el-menu--collapse { border-right: none; }
+</style>

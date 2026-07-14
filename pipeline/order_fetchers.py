@@ -156,6 +156,8 @@ def fetch_fd_orders(login, day):
     return out
 
 # ============================ 微橙 淘客渠道订单 ============================
+# 微橙订单状态看 tk_status（12=订单付款 / 13=订单失效）；响应里的 order_status 字段恒为 1，不可用
+_WC_ORDER_STATUS = {"12": "订单付款", "13": "订单失效"}
 def fetch_wc_orders(login, day):
     a = login["auth"]
     hdr = {"content-type": "application/x-www-form-urlencoded", "accept": "application/json",
@@ -181,7 +183,7 @@ def fetch_wc_orders(login, day):
                 product_id=str(it.get("item_id") or "") or None,
                 product_info=it.get("item_title"), product_price=_num(it.get("item_price")),
                 pay_amount=_num(it.get("alipay_total_price")),
-                order_status=str(it.get("order_status") or it.get("tk_status") or ""),
+                order_status=_WC_ORDER_STATUS.get(str(it.get("tk_status") or ""), str(it.get("tk_status") or "")) or None,
                 callback_status=str(it.get("convert_status") or ""),
                 click_time=_dt(it.get("click_time")), pay_time=_dt(it.get("tb_paid_time")),
                 refund_time=_dt(it.get("refund_time")),

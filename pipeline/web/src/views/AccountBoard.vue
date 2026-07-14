@@ -82,13 +82,14 @@
     </div>
 
     <!-- 自定义列 弹窗 -->
-    <el-dialog v-model="colDlg" title="自定义列" width="360">
-      <div style="color:#909399;font-size:12px;margin-bottom:10px">勾选控制显示/隐藏，拖动 <b>⣿</b> 调整列顺序</div>
+    <el-dialog v-model="colDlg" title="自定义列" width="400">
+      <div style="color:#909399;font-size:12px;margin-bottom:10px">勾选控制显示/隐藏，勾「固定」把列固定到左侧（可固定多列），拖动 <b>⣿</b> 调整列顺序</div>
       <div class="col-list">
         <div v-for="(c,i) in draft" :key="c.key" class="col-item" :class="{dragging:dragIdx===i}"
           draggable="true" @dragstart="dragStart(i)" @dragover.prevent="dragOver(i)" @drop.prevent @dragend="dragEnd">
           <span class="drag-handle" title="拖动排序">⣿</span>
-          <el-checkbox v-model="c.visible">{{ colLabel(c.key) }}</el-checkbox>
+          <el-checkbox v-model="c.visible" style="flex:1">{{ colLabel(c.key) }}</el-checkbox>
+          <el-checkbox v-model="c.pinned" size="small" class="pin-cb" title="固定到左侧">📌固定</el-checkbox>
         </div>
       </div>
       <template #footer>
@@ -159,6 +160,8 @@ const COLS = [
   { key:'real_pay_amount', label:'真实付款(元)', width:120, type:'money', sortable:true },
   { key:'real_orders',     label:'真实订单',    width:85,  type:'int' },
   { key:'real_roi',        label:'真实ROI',     width:85,  type:'roi',   sortable:true },
+  { key:'rt_real_pay',     label:'实时真实付款(元)', width:140, type:'money' },
+  { key:'rt_real_roi',     label:'实时真实ROI', width:115, type:'roi' },
   { key:'refund_rate',     label:'退款率(%)',   width:95,  type:'rate' },
   { key:'direct_pay_amount',      label:'直投下单金额(元)', width:130, type:'money', sortable:true },
   { key:'direct_orders',          label:'直投下单量',      width:100, type:'int',   sortable:true },
@@ -184,6 +187,8 @@ const TIPS = {
   conversion_cost: '转化成本 = 总消费 / 转化数',
   roi: 'ROI = 付款金额 / 消费',
   real_roi: '真实ROI = 真实付款 / 消费',
+  rt_real_pay: '实时真实付款：当天该账户「当天真实付款」订单的付款金额之和（点击与付款为同一日期、且订单状态为已付款/已完成/订单付款/支付/已结算等付款态），数据来自订单明细',
+  rt_real_roi: '实时真实ROI = 实时真实付款 / 消费',
   refund_rate: '退款率：汇总口径 =（付款金额 − 真实付款）/ 付款金额 × 100%',
   pay_amount: '下单支付金额（含后续可能退款的部分）',
   real_pay_amount: '扣除退款后的真实成交金额',
@@ -197,14 +202,16 @@ const TIPS = {
 const colLabel = k => COLMAP[k]?.label || k
 const STORAGE = 'accountBoardCols.v1'
 
-function defaultState() { return COLS.map(c => ({ key: c.key, visible: !c.hidden })) }  // hidden 列默认不勾选
+// pinned: 用户勾选的左固定；默认沿用 COLS 里 pin:'left' 的列
+function defaultState() { return COLS.map(c => ({ key: c.key, visible: !c.hidden, pinned: c.pin === 'left' })) }
 function loadState() {
   try {
     const s = JSON.parse(localStorage.getItem(STORAGE))
     if (Array.isArray(s) && s.length) {
       const seen = new Set(s.map(x => x.key))
       const merged = s.filter(x => COLMAP[x.key])            // 丢弃已删除的列
-      for (const c of COLS) if (!seen.has(c.key)) merged.push({ key: c.key, visible: !c.hidden })  // 补新增列(hidden 默认不显示)
+        .map(x => ({ ...x, pinned: x.pinned ?? (COLMAP[x.key].pin === 'left') }))   // 老数据补 pinned
+      for (const c of COLS) if (!seen.has(c.key)) merged.push({ key: c.key, visible: !c.hidden, pinned: c.pin === 'left' })
       return merged
     }
   } catch {}
@@ -213,15 +220,15 @@ function loadState() {
 const colState = ref(loadState())
 function saveState() { localStorage.setItem(STORAGE, JSON.stringify(colState.value)) }
 
-// 可见列：pin-left 永远排最前(固定左)，pin-right(标签) 永远排最后(固定右)，中间列保持自定义顺序。
-// 这样即使历史保存的列顺序把新列排到了标签之后，标签也始终固定在最右。
+// 可见列：用户固定(pinned)的列排最前并固定左；标签(pin:'right')排最后固定右；中间列保持自定义顺序。
 const visibleColumns = computed(() => {
-  const vis = colState.value.filter(c => c.visible).map(c => COLMAP[c.key]).filter(Boolean)
-  const left = vis.filter(c => c.pin === 'left')
-  const right = vis.filter(c => c.pin === 'right')
-  const mid = vis.filter(c => c.pin !== 'left' && c.pin !== 'right')
+  const vis = colState.value.filter(c => c.visible)
+    .map(c => COLMAP[c.key] ? { ...COLMAP[c.key], _pinned: c.pinned } : null).filter(Boolean)
+  const left = vis.filter(c => c._pinned)
+  const right = vis.filter(c => !c._pinned && c.pin === 'right')
+  const mid = vis.filter(c => !c._pinned && c.pin !== 'right')
   return [...left, ...mid, ...right].map(c => ({
-    ...c, fixed: c.pin === 'left' ? 'left' : (c.pin === 'right' ? 'right' : undefined)
+    ...c, fixed: c._pinned ? 'left' : (c.pin === 'right' ? 'right' : undefined)
   }))
 })
 

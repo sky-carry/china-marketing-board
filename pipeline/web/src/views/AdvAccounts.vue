@@ -98,7 +98,13 @@ async function onFile(e) {
   importing.value = true
   try {
     const { data } = await api.post('/adv_accounts/import', f, { headers: { 'Content-Type': 'application/octet-stream' } })
-    ElMessage.success(`导入成功，更新 ${data.updated} 个账户`); load()
+    if (data.skipped) {
+      ElMessage.warning(`更新 ${data.updated} 个账户；跳过 ${data.skipped} 个系统中不存在的账户ID` +
+        (data.skipped_ids?.length ? `（如 ${data.skipped_ids.slice(0,3).join('、')}…）` : ''))
+    } else {
+      ElMessage.success(`导入成功，更新 ${data.updated} 个账户`)
+    }
+    load()
   } catch (err) { ElMessage.error('导入失败：' + (err?.response?.data?.detail || err.message)) } finally { importing.value = false }
 }
 onMounted(load)
