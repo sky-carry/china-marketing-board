@@ -22,6 +22,20 @@
           </el-radio-group>
         </div>
         <div>
+          <div class="lbl">账户名称</div>
+          <el-select v-model="accountFilter" size="small" style="width:200px" multiple filterable clearable
+            collapse-tags collapse-tags-tooltip placeholder="全部账户" @change="reload">
+            <el-option v-for="a in accountOptions" :key="a" :label="a" :value="a" />
+          </el-select>
+        </div>
+        <div v-for="f in metaFields" :key="f.key">
+          <div class="lbl">{{ f.label }}</div>
+          <el-select v-model="metaFilter[f.key]" size="small" style="width:130px" multiple filterable clearable
+            collapse-tags collapse-tags-tooltip :placeholder="'全部'+f.label" @change="reload">
+            <el-option v-for="o in (metaOptions[f.key]||[])" :key="o" :label="o" :value="o" />
+          </el-select>
+        </div>
+        <div>
           <div class="lbl">搜索账户名/ID</div>
           <el-input v-model="search" size="small" style="width:200px" clearable placeholder="回车搜索"
             @keyup.enter="reload" @clear="reload" />
@@ -103,7 +117,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import api from '../api'
 import { ElMessage } from 'element-plus'
 import { Operation, Download, QuestionFilled } from '@element-plus/icons-vue'
@@ -111,6 +125,19 @@ import { Operation, Download, QuestionFilled } from '@element-plus/icons-vue'
 const platforms = ref(['小飞机','沸点','微橙','麦斯'])
 const platform = ref(''); const range = ref(null); const search = ref('')
 const mode = ref('summary')          // summary=区间汇总 / daily=分日
+// 账户名称(多选) + 6 投放属性(多选)筛选；选项来自 /account_board_meta；刷新页面即清空(不做持久化)
+const boardMeta = ref({ accounts: [], meta_options: {}, meta_fields: [] })
+const accountFilter = ref([])
+const accountOptions = computed(() => boardMeta.value.accounts || [])
+const metaFields = computed(() => boardMeta.value.meta_fields || [])
+const metaOptions = computed(() => boardMeta.value.meta_options || {})
+const metaFilter = reactive({ category: [], product: [], ecom_platform: [], ad_channel: [], store: [], agency: [] })
+function filterParams() {
+  const p = {}
+  if (accountFilter.value.length) p.account = accountFilter.value
+  for (const k in metaFilter) if (metaFilter[k]?.length) p[k] = metaFilter[k]
+  return p
+}
 const rows = ref([]); const total = ref(0); const totalRow = ref(null)
 const tableData = computed(() => totalRow.value ? [totalRow.value, ...rows.value] : rows.value)
 const page = ref(1); const pageSize = ref(50); const sort = ref('cost'); const sortDesc = ref(true); const loading = ref(false)
@@ -253,7 +280,8 @@ async function load() {
   try {
     const { data } = await api.get('/account_board', { params: {
       platform: platform.value||undefined, start: range.value?.[0], end: range.value?.[1],
-      search: search.value||undefined, sort: sort.value, desc: sortDesc.value, mode: mode.value, limit: pageSize.value, offset:(page.value-1)*pageSize.value }})
+      search: search.value||undefined, sort: sort.value, desc: sortDesc.value, mode: mode.value,
+      limit: pageSize.value, offset:(page.value-1)*pageSize.value, ...filterParams() }})
     const base = (page.value-1)*pageSize.value
     rows.value = data.rows.map((r,i) => ({ ...r, _editing:false, _newtag:'', __idx: base+i+1 }))
     totalRow.value = data.totals ? { ...data.totals, __total:true, entity_name:'合计' } : null
@@ -285,7 +313,8 @@ async function exportCsv() {
     // 拉取当前筛选/统计方式下的全部行（不受分页限制），与页面口径一致
     const { data } = await api.get('/account_board', { params: {
       platform: platform.value||undefined, start: range.value?.[0], end: range.value?.[1],
-      search: search.value||undefined, sort: sort.value, desc: sortDesc.value, mode: mode.value, limit: 100000, offset: 0 }})
+      search: search.value||undefined, sort: sort.value, desc: sortDesc.value, mode: mode.value,
+      limit: 100000, offset: 0, ...filterParams() }})
     const cols = visibleColumns.value
     const lines = [['时间', ...cols.map(c => c.label)]]
     if (data.totals) {                                        // 合计行置顶
@@ -324,6 +353,7 @@ async function removeTag(row, i) { row.tags = row.tags.filter((_,j)=>j!==i); awa
 
 onMounted(async () => {
   try { const { data } = await api.get('/meta'); if (data.platforms?.length) platforms.value = data.platforms } catch {}
+  try { const { data } = await api.get('/account_board_meta'); boardMeta.value = data } catch {}
   const t = new Date(); const today = `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`
   range.value = [today, today]
   load()

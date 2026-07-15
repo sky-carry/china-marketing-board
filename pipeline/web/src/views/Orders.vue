@@ -24,19 +24,26 @@
           </el-select>
         </div>
         <div>
+          <div class="lbl">广告账户名称</div>
+          <el-select v-model="accountFilter" size="small" style="width:200px" multiple filterable clearable
+            collapse-tags collapse-tags-tooltip placeholder="全部账户" @change="reload">
+            <el-option v-for="a in accountOptions" :key="a" :label="a" :value="a" />
+          </el-select>
+        </div>
+        <div>
           <div class="lbl">日期范围</div>
           <el-date-picker v-model="range" type="daterange" size="small" value-format="YYYY-MM-DD"
             :shortcuts="shortcuts" start-placeholder="开始" end-placeholder="结束" style="width:230px" @change="reload" />
         </div>
         <div>
-          <div class="lbl">搜索 订单号/账号/商品</div>
+          <div class="lbl">搜索 订单号/账户/商品</div>
           <el-input v-model="search" size="small" style="width:180px" clearable placeholder="回车搜索"
             @keyup.enter="reload" @clear="reload" />
         </div>
         <div v-for="f in metaFields" :key="f.key">
           <div class="lbl">{{ f.label }}</div>
-          <el-select v-model="metaFilter[f.key]" size="small" style="width:120px" clearable filterable
-            :placeholder="'全部'+f.label" @change="reload">
+          <el-select v-model="metaFilter[f.key]" size="small" style="width:130px" multiple filterable clearable
+            collapse-tags collapse-tags-tooltip :placeholder="'全部'+f.label" @change="reload">
             <el-option v-for="o in (metaOptions[f.key]||[])" :key="o" :label="o" :value="o" />
           </el-select>
         </div>
@@ -107,11 +114,19 @@ import { ElMessage } from 'element-plus'
 const meta = ref({ platforms: [], types: {}, logins: {} })
 const platforms = computed(() => meta.value.platforms || [])
 const platform = ref(''); const orderType = ref(''); const login = ref(''); const range = ref(null); const search = ref('')
-// 6 个投放属性筛选（类目/投放产品/电商平台/投放渠道/店铺/代理商，值来自 account_meta）
-const metaFilter = reactive({ category: '', product: '', ecom_platform: '', ad_channel: '', store: '', agency: '' })
+const accountFilter = ref([])                       // 广告账户名称(多选)
+const accountOptions = computed(() => meta.value.accounts || [])
+// 6 个投放属性筛选（类目/投放产品/电商平台/投放渠道/店铺/代理商，值来自 account_meta），均多选
+const metaFilter = reactive({ category: [], product: [], ecom_platform: [], ad_channel: [], store: [], agency: [] })
 const metaFields = computed(() => meta.value.meta_fields || [])
 const metaOptions = computed(() => meta.value.meta_options || {})
-function metaParams() { const p = {}; for (const k in metaFilter) if (metaFilter[k]) p[k] = metaFilter[k]; return p }
+// 组装筛选参数：账户名称 + 6 属性，均为多选数组，空则不传（axios 已配置数组序列化为 key=a&key=b）
+function metaParams() {
+  const p = {}
+  if (accountFilter.value.length) p.account = accountFilter.value
+  for (const k in metaFilter) if (metaFilter[k]?.length) p[k] = metaFilter[k]
+  return p
+}
 const rows = ref([]); const total = ref(0); const sumPay = ref(0)
 const page = ref(1); const pageSize = ref(50); const sort = ref('pay_time'); const loading = ref(false)
 
@@ -155,8 +170,8 @@ function enrich(r) {
 const COLS = [
   { key:'platform',        label:'平台',        width:70,  fixed:'left' },
   { key:'order_type',      label:'订单类型',    width:110, fixed:'left' },
-  { key:'ad_account_name', label:'广告账号名称', minWidth:180 },
-  { key:'ad_account_id',   label:'广告账号ID',  width:150 },
+  { key:'ad_account_name', label:'广告账户名称', minWidth:180 },
+  { key:'ad_account_id',   label:'广告账户ID',  width:150 },
   { key:'ad_name',         label:'广告名称',    minWidth:180 },
   { key:'material_name',   label:'视频素材名称', minWidth:160 },
   { key:'main_order_no',   label:'主订单号',    width:170 },

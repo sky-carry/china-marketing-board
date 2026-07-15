@@ -1,6 +1,8 @@
 import axios from 'axios'
 
-const api = axios.create({ baseURL: '/api', timeout: 60000 })
+// paramsSerializer.indexes=null：数组参数序列化为重复键 key=a&key=b（FastAPI 的 Query(list) 需要此格式，
+// 而非默认的 key[]=a）。多选筛选(账户/类目等)依赖它。
+const api = axios.create({ baseURL: '/api', timeout: 60000, paramsSerializer: { indexes: null } })
 
 // 请求带上登录 token
 api.interceptors.request.use(cfg => {
