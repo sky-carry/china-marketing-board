@@ -124,6 +124,15 @@ def fetch_xfj_orders(login, day):
     return out
 
 # ============================ 沸点 电商订单 ============================
+# 归因触点 tracePoint 字典：3=联盟点击, 2=有效播放+点击；未知码保留原值
+_FD_TRACE = {"3": "联盟点击", "2": "有效播放+点击"}
+def _fd_trace(v):
+    return None if v is None else _FD_TRACE.get(str(v), str(v))
+# 回传状态：convertStatus 直接返回中文文案(实测有 "未回传"，为空则代表已回传——
+# 已用样本验证 null→已回传、字符串"未回传"→未回传)。原样透传，仅空值兜底为已回传。
+def _fd_callback(v):
+    return "已回传" if v in (None, "", "-", "--") else str(v)
+
 def fetch_fd_orders(login, day):
     a = login["auth"]
     hdr = {"accept": "application/json", "content-type": "application/json", "did": a["did"], "token": a["token"],
@@ -146,10 +155,10 @@ def fetch_fd_orders(login, day):
                 product_info=it.get("goodsInfo"),
                 product_price=(_num(it.get("goodsPrice")) or 0) / 100 if it.get("goodsPrice") is not None else None,
                 pay_amount=(_num(it.get("payMoney")) or 0) / 100 if it.get("payMoney") is not None else None,
-                order_status=it.get("orderStatus"), callback_status=it.get("convertStatus"),
+                order_status=it.get("orderStatus"), callback_status=_fd_callback(it.get("convertStatus")),
                 click_time=_dt(it.get("orderClickTime")), pay_time=_dt(it.get("orderPayTime")),
                 refund_time=_dt(it.get("orderRefundTime")),
-                attribution=str(it.get("tracePoint") or "") or None, ad_position=it.get("channelSite")))
+                attribution=_fd_trace(it.get("tracePoint")), ad_position=it.get("channelSite")))
         if d.get("endPage") or len(lst) < 200 or not lst:
             break
         page += 1
