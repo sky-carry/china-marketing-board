@@ -44,6 +44,8 @@ def _row(**kw):
 # ============================ 小飞机 CID 订单 ============================
 _XFJ_STATUS = {"0": "无效归因", "1": "待付款", "2": "已付款", "3": "已退款",
                "4": "拆单", "5": "已完成", "6": "已付定金"}   # validCode -> 中文；未知保留原值
+# 归因触点 tracePoint -> 中文（与小飞机后台一致）：3=点击 2=有效触点 1=曝光；未知保留原值
+_XFJ_TRACE = {"1": "曝光归因", "2": "有效触点归因", "3": "点击归因"}
 XFJ_ORDER_TYPES = {
     "京东联盟PRO": {"url": "/v1/cid/order/jdCidList", "_type": "CID_JDCID_ORDER_REPORT", "level": 133, "Type": 133,
                  "extra": {"TracePoints": [], "AdxIds": []},
@@ -116,7 +118,7 @@ def fetch_xfj_orders(login, day):
                     order_status=status, callback_status=callback,
                     click_time=_dt(ck), pay_time=_dt(it.get("PayTime") or o.get("payTime")),
                     refund_time=_dt(it.get("RefundTime")),
-                    attribution=str(it.get("TracePoint") or it.get("AttrType") or o.get("tracePoint") or "") or None,
+                    attribution=(lambda tp: _XFJ_TRACE.get(tp, tp) or None)(str(it.get("TracePoint") or it.get("AttrType") or o.get("tracePoint") or "")),
                     ad_position=it.get("ClickAdxCSiteName")))
             if len(items) < 200 or not items:
                 break
