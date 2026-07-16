@@ -70,15 +70,7 @@ async function devLogin() {
 }
 
 onMounted(async () => {
-  // 飞书回调带 token：存下后【整页重载】进看板。不能用 SPA 内跳转——登录页启动时可能已发出
-  // 无 token 的请求(如 App.vue 的 /api/meta)，它稍后返回 401 会被拦截器清掉刚存的 token 并弹回登录。
-  if (route.query.token) {
-    localStorage.setItem('authToken', route.query.token)
-    localStorage.setItem('authUser', route.query.name || '飞书用户')
-    window.location.replace('/')   // 去掉 URL 里的 ?token，回根路径
-    window.location.reload()       // 强制整页重载，带 token 干净初始化，避开竞态
-    return
-  }
+  // 飞书回调的 token 已由 main.js(bootAuth) 在应用启动前处理，这里只管错误提示与登录方式
   if (route.query.err) ElMessage.error(String(route.query.err))
   try { const { data } = await api.get('/auth_config'); authCfg.value = data } catch {}
 })

@@ -1,3 +1,4 @@
+import './bootAuth'   // 必须最前：飞书 token 前置落地并清理 URL(须在 router 创建前执行)
 import { createApp } from 'vue'
 import ElementPlus from 'element-plus'
 import 'element-plus/dist/index.css'
