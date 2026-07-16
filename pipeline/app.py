@@ -145,14 +145,17 @@ def feishu_callback(code:str=None, state:str=None):
     if not (cfg["app_id"] and cfg["app_secret"]): return _login_redirect(err="飞书登录未配置")
     if not code or not _feishu_state_ok(state or ""): return _login_redirect(err="飞书登录校验失败")
     try:
-        aat=_feishu_post("https://open.feishu.cn/open-apis/auth/v3/app_access_token/internal",
-                         {"app_id":cfg["app_id"],"app_secret":cfg["app_secret"]}).get("app_access_token")
-        if not aat: raise RuntimeError("app_access_token 获取失败")
+        ar=_feishu_post("https://open.feishu.cn/open-apis/auth/v3/app_access_token/internal",
+                        {"app_id":cfg["app_id"],"app_secret":cfg["app_secret"]})
+        aat=ar.get("app_access_token")
+        if not aat: raise RuntimeError(f"app_access_token失败 code={ar.get('code')} msg={ar.get('msg')}")
         d=_feishu_post("https://open.feishu.cn/open-apis/authen/v1/access_token",
                        {"grant_type":"authorization_code","code":code}, bearer=aat)
         u=d.get("data") or {}
         name=u.get("name") or u.get("open_id") or "飞书用户"
+        print(f"[feishu] 登录成功 exchange_code={d.get('code')} name={name}", flush=True)
     except Exception as e:
+        print(f"[feishu] 登录失败: {e}", flush=True)
         return _login_redirect(err=f"飞书登录失败:{e}")
     return _login_redirect(token=_make_token(name), name=name)
 

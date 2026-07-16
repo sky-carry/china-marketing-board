@@ -25,7 +25,8 @@ const router = createRouter({
 router.beforeEach((to) => {
   const authed = !!localStorage.getItem('authToken')
   if (!to.meta.public && !authed) return { path: '/login', query: { redirect: to.fullPath } }
-  if (to.path === '/login' && authed) return { path: '/dashboard' }
+  // 已登录访问登录页回看板；但飞书回调带 token(?token=)时要放行，让 Login 存下新 token(否则旧token把新token挡掉)
+  if (to.path === '/login' && authed && !to.query.token) return { path: '/dashboard' }
 })
 
 export default router
