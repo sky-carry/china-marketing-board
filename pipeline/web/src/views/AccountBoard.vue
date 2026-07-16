@@ -298,7 +298,7 @@ function onSort({ prop, order }) {
 
 // ================= 导出数据(所见即所得：当前可见列 + 当前筛选/统计方式的全部行) =================
 function cellForExport(row, col) {
-  if (col.type === 'tags') return (row.tags || []).join(' ')
+  if (col.type === 'tags') return (Array.isArray(row.tags) ? row.tags : []).join(' ')
   const v = row[col.key]
   if (v == null) return ''
   return ['money','int','rate','roi'].includes(col.type) ? Number(v) : v   // 数值保留原始值，Excel 可直接计算

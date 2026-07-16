@@ -486,7 +486,8 @@ def account_board(start:str=None, end:str=None, platform:str=None, search:str=No
         return d
     def rnd(d):
         rnd_metrics(d)
-        d["tags"]=tagmap.get((d["platform"],d["entity_id"]),[])
+        _t=tagmap.get((d["platform"],d["entity_id"]),[])
+        d["tags"]=_t if isinstance(_t,list) else []   # 防脏数据(jsonb 空对象{})导致前端 .join 报错
         m=metamap.get(d["entity_id"]) or {}
         for f in META_FIELDS: d[f]=m.get(f)
         k=(d["platform"],d["entity_id"])+((d["date"],) if daily else ())
