@@ -2,11 +2,11 @@
 """投放数据平台 后端 (FastAPI)。
 运行: uvicorn app:app --host 0.0.0.0 --port 8000
 提供: 账号管理 / 数据查询(看板) / 任务&运行 / 登录刷新 API，并托管前端静态文件。"""
-import os, datetime, hashlib, hmac, base64, json, time, secrets, psycopg2, psycopg2.extras
+import os, datetime, hashlib, hmac, base64, json, time, secrets, urllib.request, urllib.parse, psycopg2, psycopg2.extras
 from fastapi import FastAPI, HTTPException, Body, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from starlette.requests import Request
 
 HERE=os.path.dirname(os.path.abspath(__file__))
@@ -55,7 +55,7 @@ def _verify_token(token):
     except Exception:
         return None
 
-_PUBLIC_API={"/api/login","/api/health"}
+_PUBLIC_API={"/api/login","/api/health","/api/auth_config","/api/feishu/login_url","/api/feishu/callback","/api/dev_login"}
 @app.middleware("http")
 async def _auth_mw(request:Request, call_next):
     path=request.url.path
@@ -91,6 +91,76 @@ def change_password(body:dict=Body(...)):
     salt=secrets.token_hex(16)
     cur.execute("UPDATE auth_users SET salt=%s,pw_hash=%s,updated_at=now() WHERE username=%s",(salt,_hash_pw(new,salt),u))
     c.close(); return {"ok":True}
+
+# ============================ 飞书登录(OAuth) + 本地开发免登录 ============================
+# 配置优先环境变量，其次本地 feishu_config.json(已加入 .git/info/exclude，含 app_secret，勿提交)。
+# app_secret 是敏感信息，任何日志/接口都不回显。
+_FEISHU_FILE=os.path.join(HERE,"feishu_config.json")
+def _feishu_cfg():
+    d={}
+    try: d=json.load(open(_FEISHU_FILE,encoding="utf-8"))
+    except Exception: pass
+    dev=os.environ.get("DEV_LOGIN"); dev=dev if dev is not None else d.get("dev_login")
+    return {"app_id":os.environ.get("FEISHU_APP_ID") or d.get("app_id") or "",
+            "app_secret":os.environ.get("FEISHU_APP_SECRET") or d.get("app_secret") or "",
+            "redirect_uri":os.environ.get("FEISHU_REDIRECT_URI") or d.get("redirect_uri") or "",
+            "dev_login":str(dev).lower() in ("1","true","yes","on")}
+
+def _feishu_state():   # 无状态 CSRF：签名的时间戳，回调时校验签名 + 10 分钟有效期
+    ts=str(int(time.time()))
+    return ts+"."+hmac.new(_SECRET,("fs"+ts).encode(),hashlib.sha256).hexdigest()[:16]
+def _feishu_state_ok(s):
+    try:
+        ts,sig=s.split(".")
+        return hmac.compare_digest(sig,hmac.new(_SECRET,("fs"+ts).encode(),hashlib.sha256).hexdigest()[:16]) and int(ts)>=time.time()-600
+    except Exception: return False
+
+def _feishu_post(url, body, bearer=None):
+    hdr={"Content-Type":"application/json; charset=utf-8","Accept-Encoding":"identity"}
+    if bearer: hdr["Authorization"]="Bearer "+bearer
+    req=urllib.request.Request(url,data=json.dumps(body).encode(),headers=hdr,method="POST")
+    return json.loads(urllib.request.urlopen(req,timeout=30).read().decode("utf-8","replace"))
+
+def _login_redirect(**q):   # 带参跳回前端(hash 路由)登录页
+    return RedirectResponse("/#/login?"+urllib.parse.urlencode(q),status_code=302)
+
+@app.get("/api/auth_config")
+def auth_config():
+    """前端登录页据此决定显示哪种登录入口(飞书 / 开发免登录)。不回显任何密钥。"""
+    cfg=_feishu_cfg()
+    return {"feishu_enabled":bool(cfg["app_id"] and cfg["app_secret"] and cfg["redirect_uri"]),
+            "dev_login":cfg["dev_login"]}
+
+@app.get("/api/feishu/login_url")
+def feishu_login_url():
+    cfg=_feishu_cfg()
+    if not (cfg["app_id"] and cfg["redirect_uri"]): raise HTTPException(400,"未配置飞书登录")
+    q=urllib.parse.urlencode({"app_id":cfg["app_id"],"redirect_uri":cfg["redirect_uri"],"state":_feishu_state()})
+    return {"url":"https://open.feishu.cn/open-apis/authen/v1/index?"+q}
+
+@app.get("/api/feishu/callback")
+def feishu_callback(code:str=None, state:str=None):
+    """飞书授权回调：code 换 token → 拿用户名 → 签发本平台 token → 跳回前端登录页。"""
+    cfg=_feishu_cfg()
+    if not (cfg["app_id"] and cfg["app_secret"]): return _login_redirect(err="飞书登录未配置")
+    if not code or not _feishu_state_ok(state or ""): return _login_redirect(err="飞书登录校验失败")
+    try:
+        aat=_feishu_post("https://open.feishu.cn/open-apis/auth/v3/app_access_token/internal",
+                         {"app_id":cfg["app_id"],"app_secret":cfg["app_secret"]}).get("app_access_token")
+        if not aat: raise RuntimeError("app_access_token 获取失败")
+        d=_feishu_post("https://open.feishu.cn/open-apis/authen/v1/access_token",
+                       {"grant_type":"authorization_code","code":code}, bearer=aat)
+        u=d.get("data") or {}
+        name=u.get("name") or u.get("open_id") or "飞书用户"
+    except Exception as e:
+        return _login_redirect(err=f"飞书登录失败:{e}")
+    return _login_redirect(token=_make_token(name), name=name)
+
+@app.post("/api/dev_login")
+def dev_login():
+    """本地开发免登录：仅当配置 dev_login=true(本地)才可用，服务器默认关闭。"""
+    if not _feishu_cfg()["dev_login"]: raise HTTPException(403,"开发免登录未开启")
+    return {"ok":True,"token":_make_token("dev"),"username":"dev"}
 
 # ============================ 指标定义(SQL 聚合，比率按明细重算) ============================
 METRICS={
