@@ -66,63 +66,65 @@ def fetch_xfj_orders(login, day):
     a = login["auth"]
     if not a.get("cid_token"):
         raise RuntimeError("小飞机CID token missing login(未登录CID)")
-    op = a.get("cid_op_uid") or a.get("op_uid")
+    # 一个小飞机登录可挂多个项目(op_uid)；订单也须逐项目抓，否则漏掉其它项目的订单
+    op_uids = [str(x) for x in (a.get("op_uids") or [a.get("cid_op_uid") or a.get("op_uid")])]
     out = []
-    for otype, cfg in XFJ_ORDER_TYPES.items():
-        hdr = _xfj_hdr(a, op)
-        page = 1
-        while True:
-            data = {"order": "PayTime|-1", "level": cfg["level"], "Type": cfg["Type"], "_type": cfg["_type"],
-                    "PayTimeRange": {"begindate": _ts(day), "enddate": _ts(day, True)},
-                    "page": page, "limit": 200, "metrics": [], "SelectedColumns": cfg["cols"]}
-            data.update(cfg["extra"])
-            body = json.dumps({"mid": page, "source": "td.web.vue", "url": cfg["url"], "data": data}).encode()
-            req = urllib.request.Request("https://cid.smallfighter.com" + cfg["url"], data=body, headers=hdr, method="POST")
-            resp = json.loads(urllib.request.urlopen(req, timeout=60).read().decode("utf-8", "replace"))
-            if resp.get("code") != 0:
-                raise RuntimeError(f"小飞机CID订单 token expired login code={resp.get('code')} msg={resp.get('msg') or resp.get('message')}")
-            d = resp.get("data") or {}
-            items = d.get("items") or []
-            for it in items:
-                o = it.get("Order") or {}
-                # 点击时间在嵌套 Click/Impression 子对象里
-                ck = (it.get("Click") or {}).get("clickTime") or (it.get("Impression") or {}).get("clickTime") or it.get("ClickTime")
-                if otype == "流量通PRO":     # 淘宝订单：金额在 Order 子对象，单位分÷100
-                    ap = _num(o.get("actual_pay_fee")); pay = ap / 100 if ap is not None else None
-                    pf = _num(o.get("pay_fee")); price = pf / 100 if pf is not None else None
-                    product = o.get("pay_item_name") or o.get("item_name")
-                    status = _XFJ_STATUS.get(str(o.get("order_status") or it.get("Status") or ""), str(o.get("order_status") or it.get("Status") or ""))
-                    pid = str(o.get("item_id") or o.get("pay_item_id") or "") or None   # 淘宝商品id
-                else:                        # 京东联盟PRO：金额单位元
-                    pay = _num(o.get("cosPrice")); price = _num(o.get("price"))
-                    product = o.get("skuName") or it.get("GoodInfos")
-                    vc = str(it.get("Status") or o.get("validCode") or "")
-                    status = _XFJ_STATUS.get(vc, vc)   # validCode 2=已付款
-                    pid = str(o.get("skuId") or it.get("OrderGoodExtId") or "") or None  # 京东商品SKU id
-                # 回传状态：有成功回传记录=回传成功；被扣量/无记录=未回传
-                conv = it.get("ConvHistory") or []
-                if any(isinstance(cc, dict) and cc.get("ResponseSuc") for cc in conv):
-                    callback = "回传成功"
-                elif it.get("AdConvAbortN") or it.get("AdConvAbortCause"):
-                    callback = "未回传(扣量)"
-                else:
-                    callback = "未回传"
-                out.append(_row(
-                    platform="小飞机", login_account=login["tag"], order_type=otype,
-                    ad_account_name=it.get("AccountName"), ad_account_id=str(it.get("AccountExtId") or it.get("AdxAccountId") or ""),
-                    ad_name=it.get("CampaignName"), material_name=it.get("ClickAdxMid3Name") or it.get("CreativeName"),
-                    main_order_no=str(it.get("OrderParentId") or o.get("parentId") or "") or None,
-                    order_no=str(it.get("OrderId") or it.get("SubOrderId") or o.get("orderId") or ""),
-                    product_id=pid,
-                    product_info=product, product_price=price, pay_amount=pay,
-                    order_status=status, callback_status=callback,
-                    click_time=_dt(ck), pay_time=_dt(it.get("PayTime") or o.get("payTime")),
-                    refund_time=_dt(it.get("RefundTime")),
-                    attribution=(lambda tp: _XFJ_TRACE.get(tp, tp) or None)(str(it.get("TracePoint") or it.get("AttrType") or o.get("tracePoint") or "")),
-                    ad_position=it.get("ClickAdxCSiteName")))
-            if len(items) < 200 or not items:
-                break
-            page += 1
+    for op in op_uids:
+        for otype, cfg in XFJ_ORDER_TYPES.items():
+            hdr = _xfj_hdr(a, op)
+            page = 1
+            while True:
+                data = {"order": "PayTime|-1", "level": cfg["level"], "Type": cfg["Type"], "_type": cfg["_type"],
+                        "PayTimeRange": {"begindate": _ts(day), "enddate": _ts(day, True)},
+                        "page": page, "limit": 200, "metrics": [], "SelectedColumns": cfg["cols"]}
+                data.update(cfg["extra"])
+                body = json.dumps({"mid": page, "source": "td.web.vue", "url": cfg["url"], "data": data}).encode()
+                req = urllib.request.Request("https://cid.smallfighter.com" + cfg["url"], data=body, headers=hdr, method="POST")
+                resp = json.loads(urllib.request.urlopen(req, timeout=60).read().decode("utf-8", "replace"))
+                if resp.get("code") != 0:
+                    raise RuntimeError(f"小飞机CID订单 token expired login code={resp.get('code')} msg={resp.get('msg') or resp.get('message')}")
+                d = resp.get("data") or {}
+                items = d.get("items") or []
+                for it in items:
+                    o = it.get("Order") or {}
+                    # 点击时间在嵌套 Click/Impression 子对象里
+                    ck = (it.get("Click") or {}).get("clickTime") or (it.get("Impression") or {}).get("clickTime") or it.get("ClickTime")
+                    if otype == "流量通PRO":     # 淘宝订单：金额在 Order 子对象，单位分÷100
+                        ap = _num(o.get("actual_pay_fee")); pay = ap / 100 if ap is not None else None
+                        pf = _num(o.get("pay_fee")); price = pf / 100 if pf is not None else None
+                        product = o.get("pay_item_name") or o.get("item_name")
+                        status = _XFJ_STATUS.get(str(o.get("order_status") or it.get("Status") or ""), str(o.get("order_status") or it.get("Status") or ""))
+                        pid = str(o.get("item_id") or o.get("pay_item_id") or "") or None   # 淘宝商品id
+                    else:                        # 京东联盟PRO：金额单位元
+                        pay = _num(o.get("cosPrice")); price = _num(o.get("price"))
+                        product = o.get("skuName") or it.get("GoodInfos")
+                        vc = str(it.get("Status") or o.get("validCode") or "")
+                        status = _XFJ_STATUS.get(vc, vc)   # validCode 2=已付款
+                        pid = str(o.get("skuId") or it.get("OrderGoodExtId") or "") or None  # 京东商品SKU id
+                    # 回传状态：有成功回传记录=回传成功；被扣量/无记录=未回传
+                    conv = it.get("ConvHistory") or []
+                    if any(isinstance(cc, dict) and cc.get("ResponseSuc") for cc in conv):
+                        callback = "回传成功"
+                    elif it.get("AdConvAbortN") or it.get("AdConvAbortCause"):
+                        callback = "未回传(扣量)"
+                    else:
+                        callback = "未回传"
+                    out.append(_row(
+                        platform="小飞机", login_account=login["tag"], order_type=otype,
+                        ad_account_name=it.get("AccountName"), ad_account_id=str(it.get("AccountExtId") or it.get("AdxAccountId") or ""),
+                        ad_name=it.get("CampaignName"), material_name=it.get("ClickAdxMid3Name") or it.get("CreativeName"),
+                        main_order_no=str(it.get("OrderParentId") or o.get("parentId") or "") or None,
+                        order_no=str(it.get("OrderId") or it.get("SubOrderId") or o.get("orderId") or ""),
+                        product_id=pid,
+                        product_info=product, product_price=price, pay_amount=pay,
+                        order_status=status, callback_status=callback,
+                        click_time=_dt(ck), pay_time=_dt(it.get("PayTime") or o.get("payTime")),
+                        refund_time=_dt(it.get("RefundTime")),
+                        attribution=(lambda tp: _XFJ_TRACE.get(tp, tp) or None)(str(it.get("TracePoint") or it.get("AttrType") or o.get("tracePoint") or "")),
+                        ad_position=it.get("ClickAdxCSiteName")))
+                if len(items) < 200 or not items:
+                    break
+                page += 1
     return out
 
 # ============================ 沸点 电商订单 ============================

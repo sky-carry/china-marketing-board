@@ -740,9 +740,33 @@ _ORDER_EXPORT_COLS=[
     ("product_info","商品信息"),("product_price","商品单价"),("pay_amount","付款金额"),
     ("order_status","订单状态"),("callback_status","回传"),
     ("click_time","点击时间"),("pay_time","付款时间"),("refund_time","退款时间"),
+    # 派生字段（与前端订单页 enrich 一致）
+    ("click_to_pay","点击到付款时间"),("pay_to_refund","付款到退款时间"),
+    ("reflow_days","回流天数"),("same_day_real_pay","是否当天真实付款"),
     ("attribution","归因"),("ad_position","广告投放位置"),
 ]+[(f,META_LABELS[f]) for f in META_FIELDS]
 _TEXTFMT_COLS={"ad_account_id","main_order_no","order_no","product_id"}   # 长数字设文本,防Excel科学计数
+
+# 派生字段计算（复刻前端 Orders.vue enrich；click_time/pay_time/refund_time 是 datetime）
+_PAID_STATUSES=["已付款","已完成","订单付款","支付","成交","已结算"]
+def _fmt_dur(sec):
+    if sec is None or sec<0: return ""
+    s=int(sec); d=s//86400; h=(s%86400)//3600; m=(s%3600)//60
+    if d: return f"{d}天{h}时"
+    if h: return f"{h}时{m}分"
+    return f"{m}分"
+def _order_calc(r):
+    ct,pt,rt=r.get("click_time"),r.get("pay_time"),r.get("refund_time")
+    r["click_to_pay"]=_fmt_dur((pt-ct).total_seconds()) if (ct and pt) else ""
+    r["pay_to_refund"]=_fmt_dur((rt-pt).total_seconds()) if (pt and rt) else ""
+    if ct and pt:
+        dd=(pt.date()-ct.date()).days
+        r["reflow_days"]=dd
+        paid=any(s in (r.get("order_status") or "") for s in _PAID_STATUSES)
+        r["same_day_real_pay"]="是" if (dd==0 and paid) else "否"
+    else:
+        r["reflow_days"]=None; r["same_day_real_pay"]=""
+    return r
 
 @app.get("/api/orders/export")
 def orders_export(platform:str=None, login:str=None, order_type:str=None, start:str=None, end:str=None,
@@ -783,9 +807,11 @@ def orders_export(platform:str=None, login:str=None, order_type:str=None, start:
         v=r.get(key)
         if v is None: return ""
         if key in ("product_price","pay_amount"): return float(v)          # 数值
+        if key=="reflow_days": return int(v)                                # 回流天数(数值)
         if key in ("click_time","pay_time","refund_time","order_date"): return str(v)
         return str(v)
     for r in rows:
+        _order_calc(r)                                    # 补派生字段(点击到付款/回流天数等)
         ws.append([cell(r,k) for k,_ in _ORDER_EXPORT_COLS])
     # 长数字列设文本格式,防科学计数
     for ci,(k,_) in enumerate(_ORDER_EXPORT_COLS, start=1):
