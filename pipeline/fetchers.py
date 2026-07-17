@@ -256,18 +256,22 @@ def fetch_fd_legacy(login,level,day):
 # 8个线程同时打同一个key会瞬间超限。故全局串行化+最小间隔,超限则退避重试。
 _FD_LOCK = threading.Lock()
 _FD_LAST = [0.0]
-_FD_MIN_GAP = 2.0          # 相邻沸点API调用最小间隔(秒)
+_FD_COOLDOWN = [0.0]       # 命中42901后的全局冷却截止时间戳(所有线程共同遵守，让key真正歇够)
+_FD_MIN_GAP = 2.5          # 相邻沸点API调用最小间隔(秒)
 def _fd_api_post(url, body, hdr):
-    """串行+限速+42901退避 的沸点API请求。返回解析后的 resp dict。"""
+    """串行+限速+42901【全局】退避 的沸点API请求。返回解析后的 resp dict。
+    关键：撞到42901时设全局冷却并在锁内统一等待——否则某线程退避时其它线程仍在打接口，
+    apiKey 从不歇息、退避形同虚设(此前偶发少量单元耗尽重试仍42901的根因)。"""
     for attempt in range(6):
         with _FD_LOCK:      # 序列化: 同一时刻只允许一个沸点API请求在飞
-            gap = _FD_MIN_GAP - (time.time() - _FD_LAST[0])
-            if gap > 0: time.sleep(gap)
+            wait = max(_FD_MIN_GAP - (time.time() - _FD_LAST[0]), _FD_COOLDOWN[0] - time.time(), 0.0)
+            if wait > 0: time.sleep(wait)               # 冷却在锁内等 → 其它线程一并阻塞，全局停手
             req = urllib.request.Request(url, data=body, headers=hdr, method="POST")
             resp = json.loads(urllib.request.urlopen(req, timeout=60).read().decode("utf-8","replace"))
             _FD_LAST[0] = time.time()
-        if resp.get("code") == 42901 and attempt < 5:   # 限流: 递增等待后重试(锁外sleep,不阻塞其它线程判断)
-            time.sleep(50 + attempt*25)                 # 50,75,100,125,150s
+            if resp.get("code") == 42901:
+                _FD_COOLDOWN[0] = time.time() + (60 + attempt*40)   # 递增全局冷却:60,100,140,180,220s
+        if resp.get("code") == 42901 and attempt < 5:
             continue
         return resp
     return resp
