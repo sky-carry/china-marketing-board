@@ -4,6 +4,7 @@ import AccountBoard from './views/AccountBoard.vue'
 import PlatformDetail from './views/PlatformDetail.vue'
 import Orders from './views/Orders.vue'
 import Accounts from './views/Accounts.vue'
+import Users from './views/Users.vue'
 import Tasks from './views/Tasks.vue'
 import Login from './views/Login.vue'
 
@@ -17,6 +18,7 @@ const router = createRouter({
     { path: '/platform/:name', component: PlatformDetail, meta: { title: '平台明细' } },
     { path: '/orders', component: Orders, meta: { title: '订单明细' } },
     { path: '/accounts', component: Accounts, meta: { title: '账号管理' } },
+    { path: '/users', component: Users, meta: { title: '用户管理' } },
     { path: '/tasks', component: Tasks, meta: { title: '定时任务' } },
   ]
 })

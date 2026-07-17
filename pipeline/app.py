@@ -137,7 +137,8 @@ def _login_redirect(**q):   # 带参跳回前端(hash 路由)登录页
     return RedirectResponse("/#/login?"+urllib.parse.urlencode(q),status_code=302)
 
 def _upsert_user(open_id, u):
-    """飞书登录用户落库(开放注册)：按 open_id UPSERT，刷新资料与登录统计。失败仅记录不阻断登录。"""
+    """飞书登录用户落库(开放注册)：按 open_id UPSERT，刷新资料与登录统计。返回 is_active(禁用者拦在登录外)。
+    失败仅记录并放行(返回 True)，不因 DB 抖动阻断登录。"""
     try:
         c=db(); c.autocommit=True; cur=c.cursor()
         cur.execute("""INSERT INTO users(open_id,union_id,feishu_user_id,name,avatar_url,email,mobile,source,last_login_at,login_count)
@@ -146,12 +147,15 @@ def _upsert_user(open_id, u):
                 union_id=EXCLUDED.union_id, feishu_user_id=EXCLUDED.feishu_user_id,
                 name=EXCLUDED.name, avatar_url=EXCLUDED.avatar_url,
                 email=COALESCE(EXCLUDED.email, users.email), mobile=COALESCE(EXCLUDED.mobile, users.mobile),
-                last_login_at=now(), login_count=users.login_count+1, updated_at=now()""",
+                last_login_at=now(), login_count=users.login_count+1, updated_at=now()
+            RETURNING is_active""",
             (open_id, u.get("union_id"), str(u.get("user_id") or "") or None, u.get("name"),
              u.get("avatar_url"), u.get("email") or u.get("enterprise_email"), u.get("mobile")))
-        c.close()
+        row=cur.fetchone(); c.close()
+        return bool(row["is_active"]) if row else True
     except Exception as e:
         print("[feishu] 用户落库失败:", repr(e)[:150], flush=True)
+        return True
 
 @app.get("/api/auth_config")
 def auth_config():
@@ -187,7 +191,9 @@ def feishu_callback(code:str=None, state:str=None):
         u=info.get("data") or {}
         name=u.get("name") or u.get("open_id") or "飞书用户"
         oid=u.get("open_id")
-        if oid: _upsert_user(oid, u)          # 落库/更新用户
+        if oid and not _upsert_user(oid, u):  # 落库/更新用户；禁用者拦在门外
+            print(f"[feishu] 已禁用用户尝试登录: {name}", flush=True)
+            return _login_redirect(err="账号已被禁用，请联系管理员")
         print(f"[feishu] 登录成功(OAuth2) token_code={tk.get('code')} info_code={info.get('code')} name={name}", flush=True)
     except Exception as e:
         print(f"[feishu] 登录失败: {e}", flush=True)
@@ -200,6 +206,24 @@ def dev_login():
     """本地开发免登录：仅当配置 dev_login=true(本地)才可用，服务器默认关闭。"""
     if not _feishu_cfg()["dev_login"]: raise HTTPException(403,"开发免登录未开启")
     return {"ok":True,"token":_make_token("dev"),"username":"dev"}
+
+@app.get("/api/users")
+def list_users():
+    """用户管理：列出所有飞书登录用户(按最近登录倒序)。"""
+    c=db(); cur=c.cursor()
+    cur.execute("""SELECT id,open_id,name,avatar_url,email,mobile,source,is_active,is_admin,
+        first_login_at,last_login_at,login_count FROM users ORDER BY last_login_at DESC NULLS LAST, id DESC""")
+    rows=cur.fetchall(); c.close()
+    return {"users":rows}
+
+@app.post("/api/users/set_active")
+def set_user_active(body:dict=Body(...)):
+    """启用/禁用用户(禁用后无法再次登录；已签发的 token 到期前仍有效)。"""
+    uid=body.get("id")
+    if not uid: raise HTTPException(400,"缺少 id")
+    c=db(); c.autocommit=True; cur=c.cursor()
+    cur.execute("UPDATE users SET is_active=%s,updated_at=now() WHERE id=%s",(bool(body.get("is_active")),uid))
+    c.close(); return {"ok":True}
 
 # ============================ 指标定义(SQL 聚合，比率按明细重算) ============================
 METRICS={

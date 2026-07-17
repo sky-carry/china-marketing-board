@@ -20,6 +20,7 @@
         </el-sub-menu>
         <el-menu-item index="/orders"><el-icon><List /></el-icon><span>订单明细</span></el-menu-item>
         <el-menu-item index="/accounts"><el-icon><User /></el-icon><span>账号管理</span></el-menu-item>
+        <el-menu-item index="/users"><el-icon><Avatar /></el-icon><span>用户管理</span></el-menu-item>
         <el-menu-item index="/tasks"><el-icon><Timer /></el-icon><span>定时任务</span></el-menu-item>
       </el-menu>
     </el-aside>
@@ -27,8 +28,9 @@
       <el-header style="background:#fff;border-bottom:1px solid #ebeef5;display:flex;align-items:center;justify-content:space-between">
         <span style="font-size:16px;font-weight:600">{{ headerTitle }}</span>
         <el-dropdown @command="onCmd">
-          <span style="cursor:pointer;color:#606266;font-size:14px;display:flex;align-items:center;gap:4px">
-            <el-icon><UserFilled /></el-icon>{{ username }}<el-icon><ArrowDown /></el-icon>
+          <span style="cursor:pointer;color:#606266;font-size:14px;display:flex;align-items:center;gap:6px">
+            <el-avatar v-if="me.avatar_url" :size="26" :src="me.avatar_url" />
+            <el-icon v-else><UserFilled /></el-icon>{{ me.name || username }}<el-icon><ArrowDown /></el-icon>
           </span>
           <template #dropdown>
             <el-dropdown-menu>
@@ -66,6 +68,7 @@ const isCollapse = ref(localStorage.getItem('sidebarCollapse') === '1')   // 侧
 function toggleCollapse() { isCollapse.value = !isCollapse.value; localStorage.setItem('sidebarCollapse', isCollapse.value ? '1' : '0') }
 const isLogin = computed(() => route.path === '/login')
 const username = ref(localStorage.getItem('authUser') || 'skg')
+const me = ref({})   // 当前登录用户(飞书资料，来自 /api/me)
 const headerTitle = computed(() => route.params.name ? `平台明细 · ${route.params.name}` : route.meta.title)
 
 const pwdDlg = ref(false); const pwd = reactive({ old: '', new: '' })
@@ -90,6 +93,7 @@ async function savePwd() {
 
 onMounted(async () => {
   try { const { data } = await api.get('/meta'); if (data.platforms?.length) platforms.value = data.platforms } catch {}
+  try { const { data } = await api.get('/me'); if (data.user) me.value = data.user } catch {}
 })
 </script>
 
