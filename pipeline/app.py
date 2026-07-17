@@ -581,10 +581,14 @@ def account_board(start:str=None, end:str=None, platform:str=None, search:str=No
         args.extend(ma)
     w=" AND ".join(cond)
     if sort not in _DETAIL_METRICS: sort="cost"
-    daily = (mode=="daily")                                  # 分日：多按 date 分组，每账户每天一行
-    grp = "platform,login_account,entity_id" + (",date" if daily else "")
-    datesel = "date::text AS date, " if daily else ""
-    order = ("date DESC, " if daily else "") + f"{_DETAIL_METRICS[sort]} {'DESC' if desc else 'ASC'} NULLS LAST"
+    # 统计方式：summary=区间汇总(不分期)；daily/weekly/monthly=按日/周(周一起)/月分组，每账户每期一行
+    # date_trunc('week',...) 以周一为一周起点，符合「周一到周日为一周」
+    _PERIODS={"daily":"date","weekly":"date_trunc('week', date)::date","monthly":"date_trunc('month', date)::date"}
+    grouped = mode in _PERIODS
+    pexpr = _PERIODS.get(mode)
+    grp = "platform,login_account,entity_id" + (f",{pexpr}" if grouped else "")
+    datesel = f"({pexpr})::text AS date, " if grouped else ""     # 返回分期起始日(周=周一,月=1号),前端据 mode 格式化
+    order = ("date DESC, " if grouped else "") + f"{_DETAIL_METRICS[sort]} {'DESC' if desc else 'ASC'} NULLS LAST"
     c=db(); cur=c.cursor()
     cur.execute(f"SELECT count(*) n FROM (SELECT 1 FROM ad_daily WHERE {w} GROUP BY {grp}) x", args)
     total=cur.fetchone()["n"]
@@ -607,12 +611,14 @@ def account_board(start:str=None, end:str=None, platform:str=None, search:str=No
     if start: ocond.append("o.pay_time::date>=%s"); oargs.append(start)
     if end: ocond.append("o.pay_time::date<=%s"); oargs.append(end)
     ow=" AND ".join(ocond)
-    odatesel="o.pay_time::date::text AS d, " if daily else ""
-    ogrp="o.platform,o.ad_account_id"+(",o.pay_time::date" if daily else "")
+    _OPERIODS={"daily":"o.pay_time::date","weekly":"date_trunc('week', o.pay_time)::date","monthly":"date_trunc('month', o.pay_time)::date"}
+    opexpr=_OPERIODS.get(mode)
+    odatesel=f"({opexpr})::text AS d, " if grouped else ""
+    ogrp="o.platform,o.ad_account_id"+(f",{opexpr}" if grouped else "")
     cur.execute(f"SELECT o.platform, o.ad_account_id, {odatesel} SUM(o.pay_amount) rtpay FROM orders o WHERE {ow} GROUP BY {ogrp}", oargs)
     rtmap={}
     for r in cur.fetchall():
-        k=(r["platform"],r["ad_account_id"])+((r["d"],) if daily else ())
+        k=(r["platform"],r["ad_account_id"])+((r["d"],) if grouped else ())
         rtmap[k]=float(r["rtpay"] or 0)
     # 合计行的实时真实付款：限定在当前筛选的账户集合内(与表格口径一致)
     cur.execute(f"SELECT COALESCE(SUM(o.pay_amount),0) rtpay FROM orders o WHERE {ow} AND o.ad_account_id IN (SELECT DISTINCT entity_id FROM ad_daily WHERE {w})", oargs+args)
@@ -633,7 +639,7 @@ def account_board(start:str=None, end:str=None, platform:str=None, search:str=No
         d["tags"]=_t if isinstance(_t,list) else []   # 防脏数据(jsonb 空对象{})导致前端 .join 报错
         m=metamap.get(d["entity_id"]) or {}
         for f in META_FIELDS: d[f]=m.get(f)
-        k=(d["platform"],d["entity_id"])+((d["date"],) if daily else ())
+        k=(d["platform"],d["entity_id"])+((d["date"],) if grouped else ())
         add_rt(d, rtmap.get(k,0.0))
         return d
     return {"total":total,"rows":[rnd(r) for r in rows],"totals":add_rt(rnd_metrics(totals), tot_rtpay)}

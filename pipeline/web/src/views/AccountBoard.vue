@@ -17,8 +17,10 @@
         <div>
           <div class="lbl">统计方式</div>
           <el-radio-group v-model="mode" size="small" @change="reload">
-            <el-radio-button value="summary">日汇总</el-radio-button>
+            <el-radio-button value="summary">汇总</el-radio-button>
             <el-radio-button value="daily">分日</el-radio-button>
+            <el-radio-button value="weekly">分周</el-radio-button>
+            <el-radio-button value="monthly">分月</el-radio-button>
           </el-radio-group>
         </div>
         <div>
@@ -43,7 +45,7 @@
         <el-button size="small" type="primary" @click="reload">查询</el-button>
         <el-button size="small" @click="openColDlg"><el-icon style="margin-right:4px"><Operation /></el-icon>自定义列</el-button>
         <el-button size="small" type="success" plain :loading="exporting" @click="exportCsv"><el-icon style="margin-right:4px"><Download /></el-icon>导出数据</el-button>
-        <span style="color:#909399;font-size:12px">共 {{ total }} {{ mode==='daily'?'条(账户·日)':'个账户' }} · {{ mode==='daily'?'分日展示':'区间汇总' }} · 末列可给账户打标签</span>
+        <span style="color:#909399;font-size:12px">共 {{ total }} {{ MODE_UNIT[mode] }} · {{ MODE_DESC[mode] }} · 末列可给账户打标签</span>
       </div>
     </div>
 
@@ -124,7 +126,9 @@ import { Operation, Download, QuestionFilled } from '@element-plus/icons-vue'
 
 const platforms = ref(['小飞机','沸点','微橙','麦斯'])
 const platform = ref(''); const range = ref(null); const search = ref('')
-const mode = ref('summary')          // summary=区间汇总 / daily=分日
+const mode = ref('summary')          // summary=区间汇总 / daily=分日 / weekly=分周(周一起) / monthly=分月
+const MODE_UNIT = { summary:'个账户', daily:'条(账户·日)', weekly:'条(账户·周)', monthly:'条(账户·月)' }
+const MODE_DESC = { summary:'区间汇总', daily:'分日展示', weekly:'分周展示(周一~周日)', monthly:'分月展示' }
 // 账户名称(多选) + 6 投放属性(多选)筛选；选项来自 /account_board_meta；刷新页面即清空(不做持久化)
 const boardMeta = ref({ accounts: [], meta_options: {}, meta_fields: [] })
 const accountFilter = ref([])
@@ -143,15 +147,27 @@ const tableData = computed(() => totalRow.value ? [totalRow.value, ...rows.value
 const page = ref(1); const pageSize = ref(50); const sort = ref('cost'); const sortDesc = ref(true); const loading = ref(false)
 const exporting = ref(false)
 
-// 时间列：合计行与汇总模式显示日期范围，分日模式显示当天日期
+// 时间列：合计行与汇总模式显示日期范围；分日/周/月显示对应分期
 const rangeText = computed(() => {
   const s = range.value?.[0], e = range.value?.[1]
   if (!s && !e) return '全部'
   return s === e ? s : `${s} ~ ${e}`
 })
+function addDays(ds, n) {           // ds='YYYY-MM-DD' + n 天（本地解析，避开时区偏移）
+  const d = new Date(ds.replace(/-/g, '/')); d.setDate(d.getDate() + n)
+  const p = x => String(x).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+// 后端返回的 row.date 是分期起始日：周=周一，月=1号；据 mode 格式化展示
+function periodText(ds) {
+  if (!ds) return ''
+  if (mode.value === 'weekly') return `${ds} ~ ${addDays(ds, 6)}`   // 周一 ~ 周日
+  if (mode.value === 'monthly') return ds.slice(0, 7)               // YYYY-MM
+  return ds                                                         // daily
+}
 function timeCell(row) {
   if (row.__total) return rangeText.value
-  return mode.value === 'daily' ? row.date : rangeText.value
+  return mode.value === 'summary' ? rangeText.value : periodText(row.date)
 }
 
 import shortcuts from '../shortcuts'
@@ -322,7 +338,7 @@ async function exportCsv() {
       lines.push([rangeText.value, ...cols.map(c => c.type==='tags' ? '' : cellForExport(t, c))])
     }
     for (const r of data.rows) {
-      const timev = mode.value === 'daily' ? r.date : rangeText.value
+      const timev = mode.value === 'summary' ? rangeText.value : periodText(r.date)
       lines.push([timev, ...cols.map(c => cellForExport(r, c))])
     }
     const csv = '﻿' + lines.map(row => row.map(csvEscape).join(',')).join('\r\n')
@@ -330,7 +346,7 @@ async function exportCsv() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `账户看板_${mode.value==='daily'?'分日':'日汇总'}_${range.value?.[0]||''}_${range.value?.[1]||''}.csv`
+    a.download = `账户看板_${MODE_DESC[mode.value]}_${range.value?.[0]||''}_${range.value?.[1]||''}.csv`
     a.click()
     URL.revokeObjectURL(url)
     ElMessage.success(`已导出 ${data.rows.length} 行`)
