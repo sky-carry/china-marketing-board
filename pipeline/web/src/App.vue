@@ -19,9 +19,10 @@
           <el-menu-item v-for="p in platforms" :key="p" :index="`/platform/${p}`">{{ p }}</el-menu-item>
         </el-sub-menu>
         <el-menu-item index="/orders"><el-icon><List /></el-icon><span>订单明细</span></el-menu-item>
-        <el-menu-item index="/accounts"><el-icon><User /></el-icon><span>账号管理</span></el-menu-item>
-        <el-menu-item index="/users"><el-icon><Avatar /></el-icon><span>用户管理</span></el-menu-item>
-        <el-menu-item index="/tasks"><el-icon><Timer /></el-icon><span>定时任务</span></el-menu-item>
+        <!-- 以下三个为管理页，仅管理员(密码登录)可见 -->
+        <el-menu-item v-if="isAdmin" index="/accounts"><el-icon><User /></el-icon><span>账号管理</span></el-menu-item>
+        <el-menu-item v-if="isAdmin" index="/users"><el-icon><Avatar /></el-icon><span>用户管理</span></el-menu-item>
+        <el-menu-item v-if="isAdmin" index="/tasks"><el-icon><Timer /></el-icon><span>定时任务</span></el-menu-item>
       </el-menu>
     </el-aside>
     <el-container>
@@ -34,7 +35,7 @@
           </span>
           <template #dropdown>
             <el-dropdown-menu>
-              <el-dropdown-item command="pwd">修改密码</el-dropdown-item>
+              <el-dropdown-item v-if="isAdmin" command="pwd">修改密码</el-dropdown-item>
               <el-dropdown-item command="logout" divided>退出登录</el-dropdown-item>
             </el-dropdown-menu>
           </template>
@@ -69,6 +70,7 @@ function toggleCollapse() { isCollapse.value = !isCollapse.value; localStorage.s
 const isLogin = computed(() => route.path === '/login')
 const username = ref(localStorage.getItem('authUser') || 'skg')
 const me = ref({})   // 当前登录用户(飞书资料，来自 /api/me)
+const isAdmin = ref(localStorage.getItem('authAdmin') === '1')   // 管理员(密码登录/授权) 才显示管理页
 const headerTitle = computed(() => route.params.name ? `平台明细 · ${route.params.name}` : route.meta.title)
 
 const pwdDlg = ref(false); const pwd = reactive({ old: '', new: '' })
@@ -79,6 +81,7 @@ function onCmd(cmd) {
 async function logout() {
   try { await ElMessageBox.confirm('确认退出登录？', '提示', { type: 'warning' }) } catch { return }
   localStorage.removeItem('authToken')
+  localStorage.removeItem('authAdmin')
   router.replace('/login')
 }
 async function savePwd() {
@@ -93,7 +96,12 @@ async function savePwd() {
 
 onMounted(async () => {
   try { const { data } = await api.get('/meta'); if (data.platforms?.length) platforms.value = data.platforms } catch {}
-  try { const { data } = await api.get('/me'); if (data.user) me.value = data.user } catch {}
+  try {
+    const { data } = await api.get('/me')
+    if (data.user) me.value = data.user
+    isAdmin.value = !!data.admin
+    localStorage.setItem('authAdmin', data.admin ? '1' : '0')
+  } catch {}
 })
 </script>
 

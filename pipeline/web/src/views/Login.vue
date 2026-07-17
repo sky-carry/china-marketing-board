@@ -33,9 +33,10 @@ const username = ref(''); const password = ref(''); const loading = ref(false); 
 const router = useRouter(); const route = useRoute()
 const authCfg = ref({ feishu_enabled: false, dev_login: false })
 
-function finishLogin(token, user) {
+function finishLogin(token, user, admin) {
   localStorage.setItem('authToken', token)
   localStorage.setItem('authUser', user)
+  localStorage.setItem('authAdmin', admin ? '1' : '0')
   router.replace(route.query.redirect || '/dashboard')
 }
 
@@ -44,7 +45,7 @@ async function submit() {
   loading.value = true
   try {
     const { data } = await api.post('/login', { username: username.value, password: password.value })
-    finishLogin(data.token, data.username)
+    finishLogin(data.token, data.username, data.admin)
   } catch (e) {
     ElMessage.error(e.response?.data?.detail || '登录失败')
   } finally { loading.value = false }
@@ -63,7 +64,7 @@ async function feishuLogin() {
 async function devLogin() {
   try {
     const { data } = await api.post('/dev_login')
-    finishLogin(data.token, data.username)
+    finishLogin(data.token, data.username, data.admin)
   } catch (e) {
     ElMessage.error(e.response?.data?.detail || '开发免登录失败')
   }

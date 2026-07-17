@@ -41,29 +41,37 @@ def _auth_secret():
 _SECRET=_auth_secret()
 def _hash_pw(pw, salt):
     return base64.b64encode(hashlib.pbkdf2_hmac("sha256", pw.encode(), bytes.fromhex(salt), 100000)).decode()
-def _make_token(username, days=7):
+def _make_token(username, role="user", days=7):
     exp=int(time.time())+days*86400
-    payload=base64.urlsafe_b64encode(json.dumps({"u":username,"exp":exp}).encode()).decode().rstrip("=")
+    payload=base64.urlsafe_b64encode(json.dumps({"u":username,"r":role,"exp":exp}).encode()).decode().rstrip("=")
     sig=hmac.new(_SECRET, payload.encode(), hashlib.sha256).hexdigest()
     return f"{payload}.{sig}"
-def _verify_token(token):
+def _token_data(token):
+    """校验签名+有效期，返回 payload dict({u,r,exp}) 或 None。"""
     try:
         payload,sig=token.split(".")
         if not hmac.compare_digest(sig, hmac.new(_SECRET, payload.encode(), hashlib.sha256).hexdigest()): return None
         data=json.loads(base64.urlsafe_b64decode(payload+"="*(-len(payload)%4)))
-        return data.get("u") if data.get("exp",0)>=time.time() else None
+        return data if data.get("exp",0)>=time.time() else None
     except Exception:
         return None
 
 _PUBLIC_API={"/api/login","/api/health","/api/auth_config","/api/feishu/login_url","/api/feishu/callback","/api/dev_login"}
+# 管理员专属接口(账号管理/用户管理/定时任务页)——仅密码登录(skg)或 is_admin 用户可访问
+_ADMIN_PREFIXES=("/api/accounts","/api/adv_accounts","/api/account_meta","/api/users","/api/tasks","/api/runs","/api/keep_tokens")
+def _is_admin_path(p):
+    return any(p==x or p.startswith(x+"/") for x in _ADMIN_PREFIXES)
 @app.middleware("http")
 async def _auth_mw(request:Request, call_next):
     path=request.url.path
     if request.method!="OPTIONS" and path.startswith("/api/") and path not in _PUBLIC_API:
         auth=request.headers.get("authorization","")
         token=auth[7:] if auth.startswith("Bearer ") else request.cookies.get("token","")
-        if not _verify_token(token):
+        data=_token_data(token)
+        if not data:
             return JSONResponse({"detail":"未登录或登录已过期"}, status_code=401)
+        if _is_admin_path(path) and data.get("r")!="admin":
+            return JSONResponse({"detail":"无权限：该功能仅管理员可用"}, status_code=403)
     return await call_next(request)
 
 @app.post("/api/login")
@@ -74,19 +82,19 @@ def login(body:dict=Body(...)):
     row=cur.fetchone(); c.close()
     if not row or not hmac.compare_digest(_hash_pw(pw,row["salt"]), row["pw_hash"]):
         raise HTTPException(401,"账号或密码错误")
-    return {"ok":True,"token":_make_token(u),"username":u}
+    return {"ok":True,"token":_make_token(u,role="admin"),"username":u,"admin":True}   # 密码登录=管理员
 
 @app.get("/api/me")
 def me(request:Request):  # 能进到这里说明中间件已放行(token 有效)
     auth=request.headers.get("authorization",""); tok=auth[7:] if auth.startswith("Bearer ") else request.cookies.get("token","")
-    sub=_verify_token(tok); user=None
+    d=_token_data(tok); sub=d.get("u") if d else None; admin=bool(d and d.get("r")=="admin"); user=None
     if sub:
         try:
             c=db(); cur=c.cursor()
             cur.execute("SELECT id,open_id,name,avatar_url,email,source,is_admin,last_login_at,login_count FROM users WHERE open_id=%s",(sub,))
             user=cur.fetchone(); c.close()
         except Exception: pass
-    return {"ok":True,"user":user}
+    return {"ok":True,"admin":admin,"user":user}
 
 @app.post("/api/change_password")
 def change_password(body:dict=Body(...)):
@@ -148,14 +156,14 @@ def _upsert_user(open_id, u):
                 name=EXCLUDED.name, avatar_url=EXCLUDED.avatar_url,
                 email=COALESCE(EXCLUDED.email, users.email), mobile=COALESCE(EXCLUDED.mobile, users.mobile),
                 last_login_at=now(), login_count=users.login_count+1, updated_at=now()
-            RETURNING is_active""",
+            RETURNING is_active, is_admin""",
             (open_id, u.get("union_id"), str(u.get("user_id") or "") or None, u.get("name"),
              u.get("avatar_url"), u.get("email") or u.get("enterprise_email"), u.get("mobile")))
         row=cur.fetchone(); c.close()
-        return bool(row["is_active"]) if row else True
+        return dict(row) if row else None
     except Exception as e:
         print("[feishu] 用户落库失败:", repr(e)[:150], flush=True)
-        return True
+        return None
 
 @app.get("/api/auth_config")
 def auth_config():
@@ -191,21 +199,23 @@ def feishu_callback(code:str=None, state:str=None):
         u=info.get("data") or {}
         name=u.get("name") or u.get("open_id") or "飞书用户"
         oid=u.get("open_id")
-        if oid and not _upsert_user(oid, u):  # 落库/更新用户；禁用者拦在门外
+        row=_upsert_user(oid, u) if oid else None   # 落库/更新用户
+        if row is not None and not row.get("is_active"):   # 禁用者拦在门外
             print(f"[feishu] 已禁用用户尝试登录: {name}", flush=True)
             return _login_redirect(err="账号已被禁用，请联系管理员")
-        print(f"[feishu] 登录成功(OAuth2) token_code={tk.get('code')} info_code={info.get('code')} name={name}", flush=True)
+        role="admin" if (row and row.get("is_admin")) else "user"   # 飞书用户默认普通，除非 is_admin
+        print(f"[feishu] 登录成功(OAuth2) token_code={tk.get('code')} info_code={info.get('code')} name={name} role={role}", flush=True)
     except Exception as e:
         print(f"[feishu] 登录失败: {e}", flush=True)
         return _login_redirect(err=f"飞书登录失败:{e}")
     # token 主体用 open_id(稳定标识)，便于 /api/me 反查用户；显示名走 name 参数
-    return _login_redirect(token=_make_token(oid or name), name=name)
+    return _login_redirect(token=_make_token(oid or name, role=role), name=name)
 
 @app.post("/api/dev_login")
 def dev_login():
     """本地开发免登录：仅当配置 dev_login=true(本地)才可用，服务器默认关闭。"""
     if not _feishu_cfg()["dev_login"]: raise HTTPException(403,"开发免登录未开启")
-    return {"ok":True,"token":_make_token("dev"),"username":"dev"}
+    return {"ok":True,"token":_make_token("dev",role="admin"),"username":"dev","admin":True}   # 本地dev=管理员
 
 @app.get("/api/users")
 def list_users():

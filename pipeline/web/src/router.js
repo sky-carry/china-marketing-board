@@ -17,9 +17,9 @@ const router = createRouter({
     { path: '/account-board', component: AccountBoard, meta: { title: '账户看板' } },
     { path: '/platform/:name', component: PlatformDetail, meta: { title: '平台明细' } },
     { path: '/orders', component: Orders, meta: { title: '订单明细' } },
-    { path: '/accounts', component: Accounts, meta: { title: '账号管理' } },
-    { path: '/users', component: Users, meta: { title: '用户管理' } },
-    { path: '/tasks', component: Tasks, meta: { title: '定时任务' } },
+    { path: '/accounts', component: Accounts, meta: { title: '账号管理', admin: true } },
+    { path: '/users', component: Users, meta: { title: '用户管理', admin: true } },
+    { path: '/tasks', component: Tasks, meta: { title: '定时任务', admin: true } },
   ]
 })
 
@@ -29,6 +29,8 @@ router.beforeEach((to) => {
   if (!to.meta.public && !authed) return { path: '/login', query: { redirect: to.fullPath } }
   // 已登录访问登录页回看板；但飞书回调带 token(?token=)时要放行，让 Login 存下新 token(否则旧token把新token挡掉)
   if (to.path === '/login' && authed && !to.query.token) return { path: '/dashboard' }
+  // 管理页(账号管理/用户管理/定时任务)仅管理员可进；非管理员直接回看板(后端也有403兜底)
+  if (to.meta.admin && localStorage.getItem('authAdmin') !== '1') return { path: '/dashboard' }
 })
 
 export default router

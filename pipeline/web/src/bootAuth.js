@@ -10,6 +10,7 @@ if (qi >= 0) {
   if (token) {
     localStorage.setItem('authToken', token)
     localStorage.setItem('authUser', params.get('name') || '飞书用户')
+    localStorage.setItem('authAdmin', '0')   // 飞书默认普通用户，清掉上一次会话可能残留的 admin；/api/me 再按 is_admin 校正
     window.location.replace(window.location.pathname + '#/dashboard')   // 清掉带 token 的 hash
   }
 }
