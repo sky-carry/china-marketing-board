@@ -121,6 +121,10 @@ def _feishu_post(url, body, bearer=None):
     req=urllib.request.Request(url,data=json.dumps(body).encode(),headers=hdr,method="POST")
     return json.loads(urllib.request.urlopen(req,timeout=30).read().decode("utf-8","replace"))
 
+def _feishu_get(url, bearer):
+    req=urllib.request.Request(url,headers={"Authorization":"Bearer "+bearer,"Accept-Encoding":"identity"},method="GET")
+    return json.loads(urllib.request.urlopen(req,timeout=30).read().decode("utf-8","replace"))
+
 def _login_redirect(**q):   # 带参跳回前端(hash 路由)登录页
     return RedirectResponse("/#/login?"+urllib.parse.urlencode(q),status_code=302)
 
@@ -133,27 +137,31 @@ def auth_config():
 
 @app.get("/api/feishu/login_url")
 def feishu_login_url():
+    # 新版 OAuth2 授权入口(accounts.feishu.cn，用 client_id)
     cfg=_feishu_cfg()
     if not (cfg["app_id"] and cfg["redirect_uri"]): raise HTTPException(400,"未配置飞书登录")
-    q=urllib.parse.urlencode({"app_id":cfg["app_id"],"redirect_uri":cfg["redirect_uri"],"state":_feishu_state()})
-    return {"url":"https://open.feishu.cn/open-apis/authen/v1/index?"+q}
+    q=urllib.parse.urlencode({"client_id":cfg["app_id"],"redirect_uri":cfg["redirect_uri"],
+                              "response_type":"code","state":_feishu_state()})
+    return {"url":"https://accounts.feishu.cn/open-apis/authen/v1/authorize?"+q}
 
 @app.get("/api/feishu/callback")
 def feishu_callback(code:str=None, state:str=None):
-    """飞书授权回调：code 换 token → 拿用户名 → 签发本平台 token → 跳回前端登录页。"""
+    """飞书授权回调(OAuth2)：code 换 user_access_token → user_info 拿用户名 → 签发本平台 token → 跳回登录页。"""
     cfg=_feishu_cfg()
     if not (cfg["app_id"] and cfg["app_secret"]): return _login_redirect(err="飞书登录未配置")
     if not code or not _feishu_state_ok(state or ""): return _login_redirect(err="飞书登录校验失败")
     try:
-        ar=_feishu_post("https://open.feishu.cn/open-apis/auth/v3/app_access_token/internal",
-                        {"app_id":cfg["app_id"],"app_secret":cfg["app_secret"]})
-        aat=ar.get("app_access_token")
-        if not aat: raise RuntimeError(f"app_access_token失败 code={ar.get('code')} msg={ar.get('msg')}")
-        d=_feishu_post("https://open.feishu.cn/open-apis/authen/v1/access_token",
-                       {"grant_type":"authorization_code","code":code}, bearer=aat)
-        u=d.get("data") or {}
+        # 1) OAuth2 授权码换 user_access_token(v2，直接用 client_id/secret，无需先取 app_access_token)
+        tk=_feishu_post("https://open.feishu.cn/open-apis/authen/v2/oauth/token",
+                        {"grant_type":"authorization_code","client_id":cfg["app_id"],
+                         "client_secret":cfg["app_secret"],"code":code,"redirect_uri":cfg["redirect_uri"]})
+        uat=tk.get("access_token")
+        if not uat: raise RuntimeError(f"token失败 code={tk.get('code')} err={tk.get('error') or tk.get('error_description') or tk.get('msg')}")
+        # 2) 用 user_access_token 拿用户信息
+        info=_feishu_get("https://open.feishu.cn/open-apis/authen/v1/user_info", uat)
+        u=info.get("data") or {}
         name=u.get("name") or u.get("open_id") or "飞书用户"
-        print(f"[feishu] 登录成功 exchange_code={d.get('code')} name={name}", flush=True)
+        print(f"[feishu] 登录成功(OAuth2) token_code={tk.get('code')} info_code={info.get('code')} name={name}", flush=True)
     except Exception as e:
         print(f"[feishu] 登录失败: {e}", flush=True)
         return _login_redirect(err=f"飞书登录失败:{e}")
