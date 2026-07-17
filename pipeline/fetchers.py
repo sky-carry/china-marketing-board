@@ -238,15 +238,20 @@ def _fd_rows(art, items):
     return out
 
 def fetch_fd_legacy(login,level,day):
-    """【备份】沸点网页后台接口：借登录态 token/did（会过期）。"""
+    """沸点网页后台接口(did/token 登录态)：带 customizeFields 取直投字段，且【不受 apiKey 42901 频率限制】。
+    did/token 会过期，由沸点自动登录(密码)刷新；非200视为登录态失效抛auth错误触发重登。"""
     a=login["auth"]; art=FD_LEVELS[level]
     hdr={"accept":"application/json","content-type":"application/json","did":a["did"],"token":a["token"],
          "version":"1.0.2","platform":"h5","origin":"https://admin.fifay.cn","referer":"https://admin.fifay.cn/","accept-encoding":"identity","user-agent":UA}
     ds=day.isoformat(); items=[]; page=1
     while True:
-        b=json.dumps({"current":page,"pageSize":200,"startDate":ds,"endDate":ds,"adReportType":art,"orderDesc":2}).encode()
+        b=json.dumps({"current":page,"pageSize":200,"startDate":ds,"endDate":ds,"adReportType":art,"orderDesc":2,
+                      "customizeFields":FD_API_FIELDS}).encode()
         req=urllib.request.Request("https://api.fifay.cn/fifay-ad/report/union/get",data=b,headers=hdr,method="POST")
-        d=json.loads(urllib.request.urlopen(req,timeout=60).read())["data"]
+        resp=json.loads(urllib.request.urlopen(req,timeout=60).read().decode("utf-8","replace"))
+        if resp.get("code")!=200:   # 登录态失效等 → 抛 token/login 关键字错误以触发自动重登
+            raise RuntimeError(f"沸点 token expired login code={resp.get('code')} msg={resp.get('message')}")
+        d=resp.get("data") or {}
         items+=d.get("list") or []
         if d.get("endPage") or len(items)>=d.get("total",0) or not d.get("list"): break
         page+=1; time.sleep(0.1)
@@ -295,8 +300,12 @@ def fetch_fd_api(login,level,day):
     return _fd_rows(art, items)
 
 def fetch_fd(login,level,day):
-    """沸点入口：账号 auth 含 api_key 走官方API，否则回退网页接口(备份)。"""
-    return fetch_fd_api(login,level,day) if login["auth"].get("api_key") else fetch_fd_legacy(login,level,day)
+    """沸点入口：优先 did/token 网页登录态(带customizeFields取直投字段，不受apiKey 42901限流)；
+    无 did/token 才回退官方 apiKey(会限流,靠退避扛)。"""
+    a=login["auth"]
+    if a.get("did") and a.get("token"):
+        return fetch_fd_legacy(login,level,day)
+    return fetch_fd_api(login,level,day)
 
 # ============================ 博擎 (fifay 换皮，同一套接口/字段) ============================
 # 博擎(bccid.jingcaiplus.com) 是沸点(fifay) 的白标系统，连接口都用 api.fifay.cn，字段与沸点一致。
