@@ -1,7 +1,7 @@
 <template>
   <div class="page">
     <el-tabs v-model="tab" class="acct-tabs">
-    <el-tab-pane label="账号管理" name="login">
+    <el-tab-pane label="看板账号管理" name="login">
     <div class="card grow">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
         <span style="color:#909399;font-size:13px">
@@ -64,7 +64,7 @@
       </div>
     </div>
     </el-tab-pane>
-    <el-tab-pane label="投放账户管理" name="adv" lazy>
+    <el-tab-pane label="系统子账户管理" name="adv" lazy>
       <AdvAccounts v-if="tab==='adv'" />
     </el-tab-pane>
     </el-tabs>
