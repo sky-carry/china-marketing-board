@@ -7,8 +7,9 @@
   login:     逗号分隔 tag 过滤(默认 all)
   all:       第5参数非空 -> 含历史/停用账号
 """
-import sys, io, time, datetime
+import sys, io, os, time, datetime
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # scripts/ 下仍能 import 父目录 pipeline/ 的核心模块
 import fetchers as F
 import order_fetchers as OF
 import db as DB

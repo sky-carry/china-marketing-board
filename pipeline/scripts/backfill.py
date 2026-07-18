@@ -6,8 +6,9 @@
   levels:    逗号分隔层级名, 或 all (默认 all；也可用 account 只跑各平台账户层)
 已在 crawl_progress 里的 (平台,登录,层级,日期) 会跳过（除非删表重跑）。
 """
-import sys, io, time, datetime
+import sys, io, os, time, datetime
 sys.stdout=io.TextIOWrapper(sys.stdout.buffer,encoding="utf-8")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # scripts/ 下仍能 import 父目录 pipeline/ 的核心模块
 import fetchers as F
 import db as DB
 

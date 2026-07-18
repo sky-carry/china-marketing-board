@@ -22,6 +22,8 @@ RUN (sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.l
  && playwright install --with-deps chromium
 # 后端代码
 COPY *.py ./
+# 维护脚本（回填/建表等，容器内可 docker exec python scripts/xxx.py 运行）
+COPY scripts/ ./scripts/
 # 前端构建产物（app.py 从 web/dist 托管）
 COPY --from=webbuild /web/dist ./web/dist
 EXPOSE 8060
