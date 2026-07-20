@@ -1,5 +1,5 @@
 <template>
-  <el-dialog :model-value="visible" title="自定义列" width="880" top="6vh"
+  <el-dialog :model-value="visible" title="自定义列" width="1100" top="5vh"
     @update:model-value="v => emit('update:visible', v)" @open="onOpen">
     <!-- 上半：可添加的列（按分类勾选 + 关键字搜索） -->
     <div class="cc-panel">
@@ -194,7 +194,7 @@ function apply() {
 .cc-groups { max-height: 260px; overflow-y: auto; padding: 6px 12px 10px; }
 .cc-group { margin-top: 8px; }
 .cc-group-hd { padding: 4px 0; border-bottom: 1px dashed #ebeef5; margin-bottom: 6px; }
-.cc-group-body { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px 8px; }
+.cc-group-body { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px 8px; }
 .cc-opt { margin-right: 0; }
 .cc-empty { color: #c0c4cc; font-size: 13px; padding: 12px; text-align: center; }
 /* 下半已选 */
