@@ -3,6 +3,9 @@ import { createApp } from 'vue'
 import ElementPlus from 'element-plus'
 import 'element-plus/dist/index.css'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
+import dayjs from 'dayjs'
+import 'dayjs/locale/zh-cn'   // 注册 dayjs 中文 locale：weekStart=1，日期选择器一周从周一起（一二三四五六日，日在最后）
+dayjs.locale('zh-cn')
 import * as Icons from '@element-plus/icons-vue'
 import router from './router'
 import App from './App.vue'
