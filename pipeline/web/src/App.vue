@@ -103,6 +103,7 @@ onMounted(async () => {
   try {
     const { data } = await api.get('/me')
     if (data.user) me.value = data.user
+    else if (data.name) me.value = { name: data.name }   // 密码账号：显示名
     isAdmin.value = !!data.admin
     localStorage.setItem('authAdmin', data.admin ? '1' : '0')
   } catch {}

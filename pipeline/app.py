@@ -58,7 +58,8 @@ def _token_data(token):
 
 _PUBLIC_API={"/api/login","/api/health","/api/auth_config","/api/feishu/login_url","/api/feishu/callback","/api/dev_login"}
 # 管理员专属接口(账号管理/用户管理/定时任务页)——仅密码登录(skg)或 is_admin 用户可访问
-_ADMIN_PREFIXES=("/api/accounts","/api/adv_accounts","/api/account_meta","/api/users","/api/tasks","/api/runs","/api/keep_tokens")
+_ADMIN_PREFIXES=("/api/accounts","/api/adv_accounts","/api/account_meta","/api/users","/api/tasks","/api/runs","/api/keep_tokens",
+                 "/api/auth_accounts","/api/scope_options")
 def _is_admin_path(p):
     return any(p==x or p.startswith(x+"/") for x in _ADMIN_PREFIXES)
 @app.middleware("http")
@@ -74,27 +75,77 @@ async def _auth_mw(request:Request, call_next):
             return JSONResponse({"detail":"无权限：该功能仅管理员可用"}, status_code=403)
     return await call_next(request)
 
+# ============================ 数据可见范围(账号密码普通用户按 代理商/账户 隔离) ============================
+def _req_token(request:Request):
+    auth=request.headers.get("authorization",""); tok=auth[7:] if auth.startswith("Bearer ") else request.cookies.get("token","")
+    return _token_data(tok)
+
+def _scope_ids(request:Request):
+    """当前用户可见的账户 entity_id 列表；返回 None=不限制(管理员/飞书用户)。
+    仅「密码普通账号」(auth_users 里 is_admin=false)受限：范围 = 选中账户 ∪ 选中代理商下的账户。
+    已授权但范围为空 -> 返回 []（看不到任何数据）。"""
+    d=_req_token(request)
+    if not d or d.get("r")=="admin": return None
+    u=d.get("u")
+    if not u: return None
+    c=db(); cur=c.cursor()
+    cur.execute("SELECT is_admin, scope_agencies, scope_accounts FROM auth_users WHERE username=%s",(u,))
+    row=cur.fetchone()
+    if not row or row["is_admin"]:      # 不在密码表(飞书用户) 或 管理员 -> 不限制
+        c.close(); return None
+    agencies=list(row["scope_agencies"] or []); ids=set(str(x) for x in (row["scope_accounts"] or []))
+    if agencies:
+        cur.execute("SELECT entity_id FROM account_meta WHERE agency = ANY(%s)",(agencies,))
+        ids |= {r["entity_id"] for r in cur.fetchall()}
+    c.close(); return list(ids)
+
+def _scope_cond(request:Request, col="entity_id"):
+    """返回 (sql条件 or None, 参数值 or None)。None=不加过滤；'false'=空结果(无授权范围)。"""
+    ids=_scope_ids(request)
+    if ids is None: return None, None
+    if not ids: return "false", None
+    return f"{col} = ANY(%s)", ids
+
+def _apply_scope(w, args, request:Request, col="entity_id"):
+    """把当前用户的数据范围条件并入已有 WHERE(w,args)。管理员/飞书用户不变。"""
+    cond,val=_scope_cond(request, col)
+    if cond is None: return w, args
+    w=f"({w}) AND {cond}" if w else cond
+    return w, (args+[val] if val is not None else args)
+
 @app.post("/api/login")
 def login(body:dict=Body(...)):
     u=(body.get("username") or "").strip(); pw=body.get("password") or ""
-    c=db(); cur=c.cursor()
-    cur.execute("SELECT username,salt,pw_hash FROM auth_users WHERE username=%s",(u,))
-    row=cur.fetchone(); c.close()
+    c=db(); c.autocommit=True; cur=c.cursor()
+    cur.execute("SELECT username,salt,pw_hash,name,is_admin,is_active,expires_at FROM auth_users WHERE username=%s",(u,))
+    row=cur.fetchone()
     if not row or not hmac.compare_digest(_hash_pw(pw,row["salt"]), row["pw_hash"]):
-        raise HTTPException(401,"账号或密码错误")
-    return {"ok":True,"token":_make_token(u,role="admin"),"username":u,"admin":True}   # 密码登录=管理员
+        c.close(); raise HTTPException(401,"账号或密码错误")
+    if not row["is_active"]:
+        c.close(); raise HTTPException(403,"账号已停用，请联系管理员")
+    if row["expires_at"] and row["expires_at"] < datetime.datetime.now(_SH).date():
+        c.close(); raise HTTPException(403,"账号已过期，请联系管理员")
+    cur.execute("UPDATE auth_users SET last_login_at=now(), login_count=COALESCE(login_count,0)+1 WHERE username=%s",(u,))
+    c.close()
+    admin=bool(row["is_admin"])
+    return {"ok":True,"token":_make_token(u,role="admin" if admin else "user"),
+            "username":u,"admin":admin,"name":row["name"] or u}
 
 @app.get("/api/me")
 def me(request:Request):  # 能进到这里说明中间件已放行(token 有效)
     auth=request.headers.get("authorization",""); tok=auth[7:] if auth.startswith("Bearer ") else request.cookies.get("token","")
-    d=_token_data(tok); sub=d.get("u") if d else None; admin=bool(d and d.get("r")=="admin"); user=None
+    d=_token_data(tok); sub=d.get("u") if d else None; admin=bool(d and d.get("r")=="admin"); user=None; name=None
     if sub:
         try:
             c=db(); cur=c.cursor()
             cur.execute("SELECT id,open_id,name,avatar_url,email,source,is_admin,last_login_at,login_count FROM users WHERE open_id=%s",(sub,))
-            user=cur.fetchone(); c.close()
+            user=cur.fetchone()
+            if not user:   # 密码账号：取显示名
+                cur.execute("SELECT name FROM auth_users WHERE username=%s",(sub,)); r=cur.fetchone()
+                name=(r["name"] if r else None) or sub
+            c.close()
         except Exception: pass
-    return {"ok":True,"admin":admin,"user":user}
+    return {"ok":True,"admin":admin,"user":user,"name":name}
 
 @app.post("/api/change_password")
 def change_password(body:dict=Body(...)):
@@ -284,6 +335,75 @@ def set_user_active(body:dict=Body(...)):
     cur.execute("UPDATE users SET is_active=%s,updated_at=now() WHERE id=%s",(bool(body.get("is_active")),uid))
     c.close(); return {"ok":True}
 
+# ============================ 账号密码用户管理(管理员) ============================
+# 外部账号一律普通用户(is_admin=false)，按 代理商/账户 分配数据范围。内置 skg 为管理员，不可删/停。
+@app.get("/api/auth_accounts")
+def list_auth_accounts():
+    c=db(); cur=c.cursor()
+    cur.execute("""SELECT username,name,is_admin,is_active,note,expires_at,scope_agencies,scope_accounts,
+        last_login_at,login_count,created_at FROM auth_users ORDER BY is_admin DESC, created_at NULLS FIRST, username""")
+    rows=[dict(r) for r in cur.fetchall()]
+    for r in rows:
+        r["expires_at"]=str(r["expires_at"]) if r["expires_at"] else None
+        r["last_login_at"]=fmt_dt(r["last_login_at"]); r["created_at"]=fmt_dt(r["created_at"])
+        r["scope_agencies"]=list(r["scope_agencies"] or []); r["scope_accounts"]=list(r["scope_accounts"] or [])
+    c.close(); return {"accounts":rows}
+
+@app.post("/api/auth_accounts")
+def create_auth_account(body:dict=Body(...)):
+    u=(body.get("username") or "").strip(); pw=body.get("password") or ""
+    if not u: raise HTTPException(400,"用户名必填")
+    if len(pw)<6: raise HTTPException(400,"密码至少 6 位")
+    c=db(); c.autocommit=True; cur=c.cursor()
+    cur.execute("SELECT 1 FROM auth_users WHERE username=%s",(u,))
+    if cur.fetchone(): c.close(); raise HTTPException(400,"用户名已存在")
+    salt=secrets.token_hex(16)
+    cur.execute("""INSERT INTO auth_users(username,salt,pw_hash,name,is_admin,is_active,note,expires_at,scope_agencies,scope_accounts)
+        VALUES(%s,%s,%s,%s,false,true,%s,%s,%s,%s)""",
+        (u,salt,_hash_pw(pw,salt),(body.get("name") or u),body.get("note"),(body.get("expires_at") or None),
+         psycopg2.extras.Json(body.get("scope_agencies") or []),psycopg2.extras.Json(body.get("scope_accounts") or [])))
+    c.close(); return {"ok":True}
+
+@app.put("/api/auth_accounts/{username}")
+def update_auth_account(username:str, body:dict=Body(...)):
+    c=db(); c.autocommit=True; cur=c.cursor()
+    cur.execute("SELECT is_admin FROM auth_users WHERE username=%s",(username,)); row=cur.fetchone()
+    if not row: c.close(); raise HTTPException(404,"账号不存在")
+    sets=[]; args=[]
+    for k in ("name","note"):
+        if k in body: sets.append(f"{k}=%s"); args.append(body[k])
+    if "is_active" in body:
+        if username=="skg" and not body["is_active"]: c.close(); raise HTTPException(400,"内置管理员不可停用")
+        sets.append("is_active=%s"); args.append(bool(body["is_active"]))
+    if "expires_at" in body: sets.append("expires_at=%s"); args.append(body["expires_at"] or None)
+    if "scope_agencies" in body: sets.append("scope_agencies=%s"); args.append(psycopg2.extras.Json(body["scope_agencies"] or []))
+    if "scope_accounts" in body: sets.append("scope_accounts=%s"); args.append(psycopg2.extras.Json(body["scope_accounts"] or []))
+    if body.get("password"):
+        if len(body["password"])<6: c.close(); raise HTTPException(400,"密码至少 6 位")
+        salt=secrets.token_hex(16)
+        sets += ["salt=%s","pw_hash=%s"]; args += [salt,_hash_pw(body["password"],salt)]
+    if sets:
+        sets.append("updated_at=now()"); args.append(username)
+        cur.execute(f"UPDATE auth_users SET {','.join(sets)} WHERE username=%s",args)
+    c.close(); return {"ok":True}
+
+@app.delete("/api/auth_accounts/{username}")
+def delete_auth_account(username:str):
+    if username=="skg": raise HTTPException(400,"内置管理员不可删除")
+    c=db(); c.autocommit=True; cur=c.cursor()
+    cur.execute("DELETE FROM auth_users WHERE username=%s",(username,)); c.close(); return {"ok":True}
+
+@app.get("/api/scope_options")
+def scope_options():
+    """数据范围分配下拉：代理商列表 + 账户(entity_id+名称)列表。"""
+    c=db(); cur=c.cursor()
+    cur.execute("SELECT DISTINCT agency v FROM account_meta WHERE agency IS NOT NULL AND agency<>'' ORDER BY v")
+    agencies=[r["v"] for r in cur.fetchall()]
+    cur.execute("""SELECT entity_id, max(entity_name) name FROM ad_daily WHERE level=ANY(%s) AND cost IS NOT NULL
+        GROUP BY entity_id ORDER BY max(entity_name) NULLS LAST""",(ACCOUNT_LEVELS,))
+    accounts=[{"id":r["entity_id"],"name":r["name"] or r["entity_id"]} for r in cur.fetchall()]
+    c.close(); return {"agencies":agencies,"accounts":accounts}
+
 # ============================ 指标定义(SQL 聚合，比率按明细重算) ============================
 METRICS={
  "cost":("消费(元)","SUM(cost)"),
@@ -328,16 +448,21 @@ def _where(platforms, levels, start, end, extra=None):
 
 # ============================ 数据查询 API ============================
 @app.get("/api/meta")
-def meta():
+def meta(request:Request):
+    # 数据范围隔离：普通密码账号只看范围内账户所在平台/层级
+    sc,sv=_scope_cond(request); sw=f" WHERE {sc}" if sc else ""; sa=[sv] if sv is not None else []
     c=db(); cur=c.cursor()
-    cur.execute("SELECT DISTINCT platform FROM ad_daily ORDER BY platform")
+    cur.execute(f"SELECT DISTINCT platform FROM ad_daily{sw} ORDER BY platform", sa)
     plats=[r["platform"] for r in cur.fetchall()]
-    cur.execute("SELECT DISTINCT platform,level FROM ad_daily ORDER BY platform,level")
+    cur.execute(f"SELECT DISTINCT platform,level FROM ad_daily{sw} ORDER BY platform,level", sa)
     levels={}
     for r in cur.fetchall(): levels.setdefault(r["platform"],[]).append(r["level"])
-    cur.execute("SELECT min(date) mn, max(date) mx FROM ad_daily")
+    cur.execute(f"SELECT min(date) mn, max(date) mx FROM ad_daily{sw}", sa)
     rng=cur.fetchone()
-    cur.execute("SELECT platform,tag FROM accounts ORDER BY platform,tag")
+    if plats:
+        cur.execute("SELECT platform,tag FROM accounts WHERE platform = ANY(%s) ORDER BY platform,tag",(plats,))
+    else:
+        cur.execute("SELECT platform,tag FROM accounts WHERE false")
     logins={}
     for r in cur.fetchall(): logins.setdefault(r["platform"],[]).append(r["tag"])
     c.close()
@@ -369,7 +494,7 @@ _TOTALS_SQL = ",".join(f"{_TOTALS_OVERRIDE.get(k, e)} {k}" for k,e in _DETAIL_ME
 _PAID_STATUS_RE = "(已付款|已完成|订单付款|支付|成交|已结算)"
 
 @app.get("/api/detail")
-def detail(platform:str, level:str, login:str=None, start:str=None, end:str=None,
+def detail(request:Request, platform:str, level:str, login:str=None, start:str=None, end:str=None,
            search:str=None, sort:str="cost", limit:int=50, offset:int=0):
     cond=["platform=%s","level=%s","cost IS NOT NULL"]; args=[platform, level]
     if login: cond.append("login_account=%s"); args.append(login)
@@ -377,6 +502,7 @@ def detail(platform:str, level:str, login:str=None, start:str=None, end:str=None
     if end: cond.append("date<=%s"); args.append(end)
     if search: cond.append("(entity_name ILIKE %s OR entity_id ILIKE %s)"); args += [f"%{search}%", f"%{search}%"]
     w=" AND ".join(cond)
+    w,args=_apply_scope(w,args,request)
     if sort not in _DETAIL_METRICS: sort="cost"
     c=db(); cur=c.cursor()
     cur.execute(f"SELECT count(DISTINCT entity_id) n FROM ad_daily WHERE {w}", args); total=cur.fetchone()["n"]
@@ -395,9 +521,10 @@ def detail(platform:str, level:str, login:str=None, start:str=None, end:str=None
     return {"total":total, "rows":[rnd(r) for r in rows], "totals":rnd(totals)}
 
 @app.get("/api/summary")
-def summary(platforms:str=None, levels:str="", start:str=None, end:str=None):
+def summary(request:Request, platforms:str=None, levels:str="", start:str=None, end:str=None):
     pl=platforms.split(",") if platforms else None
     w,args=_where(pl, levels or None, start, end)
+    w,args=_apply_scope(w,args,request)
     c=db(); cur=c.cursor()
     cur.execute(f"""SELECT SUM(cost) cost, SUM(real_pay_amount) rpay,
         SUM(real_pay_amount)/NULLIF(SUM(cost),0) rroi, SUM(real_orders) rord,
@@ -408,11 +535,12 @@ def summary(platforms:str=None, levels:str="", start:str=None, end:str=None):
             "real_orders":int(r["rord"] or 0),"refund_rate":round(f(r["refund"]),2)}
 
 @app.get("/api/trend")
-def trend(metric:str="cost", gran:str="day", group:str="platform",
+def trend(request:Request, metric:str="cost", gran:str="day", group:str="platform",
           platforms:str=None, levels:str=None, start:str=None, end:str=None, topn:int=10):
     if metric not in METRICS: raise HTTPException(400,"unknown metric")
     pl=platforms.split(",") if platforms else None
     w,args=_where(pl, levels or None, start, end)
+    w,args=_apply_scope(w,args,request)
     bkt=_bucket(gran); expr=METRICS[metric][1]
     c=db(); cur=c.cursor()
     cur.execute(f"SELECT DISTINCT {bkt} t FROM ad_daily WHERE {w} ORDER BY t",args)
@@ -436,9 +564,10 @@ def trend(metric:str="cost", gran:str="day", group:str="platform",
     return {"times":times,"series":series,"metric":metric,"label":METRICS[metric][0]}
 
 @app.get("/api/table")
-def table(platforms:str=None, levels:str=None, start:str=None, end:str=None, limit:int=500, offset:int=0):
+def table(request:Request, platforms:str=None, levels:str=None, start:str=None, end:str=None, limit:int=500, offset:int=0):
     pl=platforms.split(",") if platforms else None
     w,args=_where(pl, levels, start, end)
+    w,args=_apply_scope(w,args,request)
     c=db(); cur=c.cursor()
     cur.execute(f"SELECT count(*) n FROM ad_daily WHERE {w}",args); total=cur.fetchone()["n"]
     cur.execute(f"""SELECT platform,login_account,level,date,entity_name,account_name,parent_name,channel,
@@ -609,12 +738,16 @@ def keep_tokens(only_expired:bool=False):
 ACCOUNT_LEVELS=['推广账号','账户维度','账户']
 
 @app.get("/api/account_board")
-def account_board(start:str=None, end:str=None, platform:str=None, search:str=None,
+def account_board(request:Request, start:str=None, end:str=None, platform:str=None, search:str=None,
                   account:list[str]=Query(None),
                   category:list[str]=Query(None), product:list[str]=Query(None), ecom_platform:list[str]=Query(None),
                   ad_channel:list[str]=Query(None), store:list[str]=Query(None), agency:list[str]=Query(None),
                   sort:str="cost", desc:bool=True, limit:int=100, offset:int=0, mode:str="summary"):
     cond=["level = ANY(%s)","cost IS NOT NULL"]; args=[ACCOUNT_LEVELS]
+    scond,sval=_scope_cond(request)                                   # 数据范围隔离(entity_id)
+    if scond:
+        cond.append(scond)
+        if sval is not None: args.append(sval)
     if platform: cond.append("platform=%s"); args.append(platform)
     if start: cond.append("date>=%s"); args.append(start)
     if end: cond.append("date<=%s"); args.append(end)
@@ -694,9 +827,13 @@ def account_board(start:str=None, end:str=None, platform:str=None, search:str=No
     return {"total":total,"rows":[rnd(r) for r in rows],"totals":add_rt(rnd_metrics(totals), tot_rtpay)}
 
 @app.get("/api/account_board_meta")
-def account_board_meta(platform:str=None):
-    """账户看板筛选下拉选项：账户名称候选 + 6 个投放属性候选。"""
+def account_board_meta(request:Request, platform:str=None):
+    """账户看板筛选下拉选项：账户名称候选 + 6 个投放属性候选。普通密码账号只出范围内的选项。"""
     cond=["level = ANY(%s)","cost IS NOT NULL"]; args=[ACCOUNT_LEVELS]
+    scond,sval=_scope_cond(request)
+    if scond:
+        cond.append(scond)
+        if sval is not None: args.append(sval)
     if platform: cond.append("platform=%s"); args.append(platform)
     w=" AND ".join(cond)
     c=db(); cur=c.cursor()
@@ -704,7 +841,11 @@ def account_board_meta(platform:str=None):
     accounts=[r["v"] for r in cur.fetchall()]
     mopts={}
     for f in META_FIELDS:
-        cur.execute(f"SELECT DISTINCT {f} v FROM account_meta WHERE {f} IS NOT NULL AND {f}<>'' ORDER BY v")
+        if scond:   # 受限用户：属性取值也只出范围内账户的
+            cur.execute(f"""SELECT DISTINCT {f} v FROM account_meta WHERE {f} IS NOT NULL AND {f}<>''
+                AND entity_id IN (SELECT entity_id FROM ad_daily WHERE {w}) ORDER BY v""", args)
+        else:
+            cur.execute(f"SELECT DISTINCT {f} v FROM account_meta WHERE {f} IS NOT NULL AND {f}<>'' ORDER BY v")
         mopts[f]=[r["v"] for r in cur.fetchall()]
     c.close()
     return {"accounts":accounts,"meta_options":mopts,
@@ -716,17 +857,19 @@ def account_board_meta(platform:str=None):
 # 「真实」口径 = 订单表当天真实付款(点击=付款同日且已付款类)，与账户看板「实时真实付款」一致。
 # 「上一个小时消耗」无小时级数据源，返回 None（前端显示 —）。
 @app.get("/api/realtime_board")
-def realtime_board(date:str=None):
+def realtime_board(request:Request, date:str=None):
     day = date or datetime.datetime.now(_SH).date().isoformat()
     yday = (datetime.date.fromisoformat(day) - datetime.timedelta(days=1)).isoformat()
+    scond,sval=_scope_cond(request); sc=f" AND {scond}" if scond else ""   # 数据范围隔离(entity_id)
+    sx=[sval] if sval is not None else []
     c=db(); cur=c.cursor()
     # 今日各账户 ad_daily 聚合（消耗/直投成交/退款率*消耗）
     cur.execute(f"""SELECT entity_id, max(entity_name) entity_name, SUM(cost) cost,
         SUM(direct_real_orders) dro, SUM(direct_real_pay_amount) drp, SUM(refund_rate*cost) rrn
-        FROM ad_daily WHERE level=ANY(%s) AND date=%s AND cost>0 GROUP BY entity_id""",(ACCOUNT_LEVELS,day))
+        FROM ad_daily WHERE level=ANY(%s) AND date=%s AND cost>0{sc} GROUP BY entity_id""",[ACCOUNT_LEVELS,day]+sx)
     today={r["entity_id"]:dict(r) for r in cur.fetchall()}
     # 昨日各账户消耗
-    cur.execute(f"SELECT entity_id, SUM(cost) cost FROM ad_daily WHERE level=ANY(%s) AND date=%s GROUP BY entity_id",(ACCOUNT_LEVELS,yday))
+    cur.execute(f"SELECT entity_id, SUM(cost) cost FROM ad_daily WHERE level=ANY(%s) AND date=%s{sc} GROUP BY entity_id",[ACCOUNT_LEVELS,yday]+sx)
     ycost={r["entity_id"]:float(r["cost"] or 0) for r in cur.fetchall()}
     # 今日/昨日 各账户「当天真实付款」（orders：点击=付款同日 且 已付款类）
     def rt_by_acct(dd):
@@ -969,23 +1112,30 @@ def _order_meta_filter(cond, args, category, product, ecom_platform, ad_channel,
         cond.append("ad_account_id IN (SELECT entity_id FROM account_meta WHERE "+" AND ".join(mc)+")")
         args.extend(ma)
 @app.get("/api/order_meta")
-def order_meta():
+def order_meta(request:Request):
+    scond,sval=_scope_cond(request,"ad_account_id"); ow=f" WHERE {scond}" if scond else ""   # 范围隔离
+    sx=[sval] if sval is not None else []
     c=db(); cur=c.cursor()
-    cur.execute("SELECT DISTINCT platform FROM orders ORDER BY platform"); plats=[r["platform"] for r in cur.fetchall()]
-    cur.execute("SELECT DISTINCT platform,order_type FROM orders ORDER BY 1,2")
+    cur.execute(f"SELECT DISTINCT platform FROM orders{ow} ORDER BY platform", sx); plats=[r["platform"] for r in cur.fetchall()]
+    cur.execute(f"SELECT DISTINCT platform,order_type FROM orders{ow} ORDER BY 1,2", sx)
     types={}
     for r in cur.fetchall(): types.setdefault(r["platform"],[]).append(r["order_type"])
-    cur.execute("SELECT DISTINCT platform,login_account FROM orders ORDER BY 1,2")
+    cur.execute(f"SELECT DISTINCT platform,login_account FROM orders{ow} ORDER BY 1,2", sx)
     logins={}
     for r in cur.fetchall(): logins.setdefault(r["platform"],[]).append(r["login_account"])
-    cur.execute("SELECT min(order_date) mn, max(order_date) mx FROM orders"); rng=cur.fetchone()
+    cur.execute(f"SELECT min(order_date) mn, max(order_date) mx FROM orders{ow}", sx); rng=cur.fetchone()
     # 广告账户名称候选(多选筛选用)
-    cur.execute("SELECT DISTINCT ad_account_name v FROM orders WHERE ad_account_name IS NOT NULL AND ad_account_name<>'' ORDER BY v")
+    awhere=f"{ow} AND ad_account_name IS NOT NULL AND ad_account_name<>''" if ow else "WHERE ad_account_name IS NOT NULL AND ad_account_name<>''"
+    cur.execute(f"SELECT DISTINCT ad_account_name v FROM orders {awhere} ORDER BY v", sx)
     accounts=[r["v"] for r in cur.fetchall()]
-    # 6 个投放属性(类目/投放产品/…)的可选值，来自 account_meta，供订单页筛选下拉
+    # 6 个投放属性(类目/投放产品/…)的可选值，来自 account_meta；受限用户只出范围内账户的取值
     mopts={}
     for f in META_FIELDS:
-        cur.execute(f"SELECT DISTINCT {f} v FROM account_meta WHERE {f} IS NOT NULL AND {f}<>'' ORDER BY v")
+        if scond:
+            cur.execute(f"""SELECT DISTINCT {f} v FROM account_meta WHERE {f} IS NOT NULL AND {f}<>''
+                AND entity_id IN (SELECT ad_account_id FROM orders{ow}) ORDER BY v""", sx)
+        else:
+            cur.execute(f"SELECT DISTINCT {f} v FROM account_meta WHERE {f} IS NOT NULL AND {f}<>'' ORDER BY v")
         mopts[f]=[r["v"] for r in cur.fetchall()]
     c.close()
     return {"platforms":plats,"types":types,"logins":logins,"accounts":accounts,
@@ -993,12 +1143,16 @@ def order_meta():
             "date_min":str(rng["mn"]) if rng["mn"] else None,"date_max":str(rng["mx"]) if rng["mx"] else None}
 
 @app.get("/api/orders")
-def orders(platform:str=None, login:str=None, order_type:str=None, start:str=None, end:str=None,
+def orders(request:Request, platform:str=None, login:str=None, order_type:str=None, start:str=None, end:str=None,
            search:str=None, account:list[str]=Query(None),
            category:list[str]=Query(None), product:list[str]=Query(None), ecom_platform:list[str]=Query(None),
            ad_channel:list[str]=Query(None), store:list[str]=Query(None), agency:list[str]=Query(None),
            sort:str="pay_time", limit:int=50, offset:int=0):
     cond=[]; args=[]
+    scond,sval=_scope_cond(request,"ad_account_id")                  # 数据范围隔离
+    if scond:
+        cond.append(scond)
+        if sval is not None: args.append(sval)
     if platform: cond.append("platform=%s"); args.append(platform)
     if login: cond.append("login_account=%s"); args.append(login)
     if order_type: cond.append("order_type=%s"); args.append(order_type)
@@ -1070,7 +1224,7 @@ def _order_calc(r):
     return r
 
 @app.get("/api/orders/export")
-def orders_export(platform:str=None, login:str=None, order_type:str=None, start:str=None, end:str=None,
+def orders_export(request:Request, platform:str=None, login:str=None, order_type:str=None, start:str=None, end:str=None,
                   search:str=None, account:list[str]=Query(None),
                   category:list[str]=Query(None), product:list[str]=Query(None), ecom_platform:list[str]=Query(None),
                   ad_channel:list[str]=Query(None), store:list[str]=Query(None), agency:list[str]=Query(None), sort:str="pay_time"):
@@ -1079,6 +1233,10 @@ def orders_export(platform:str=None, login:str=None, order_type:str=None, start:
     from urllib.parse import quote
     from fastapi.responses import StreamingResponse
     cond=[]; args=[]
+    scond,sval=_scope_cond(request,"ad_account_id")                  # 数据范围隔离
+    if scond:
+        cond.append(scond)
+        if sval is not None: args.append(sval)
     if platform: cond.append("platform=%s"); args.append(platform)
     if login: cond.append("login_account=%s"); args.append(login)
     if order_type: cond.append("order_type=%s"); args.append(order_type)
@@ -1157,11 +1315,19 @@ def _ensure_tables():
     # 登录账户表：默认种子账户 skg
     cur.execute("""CREATE TABLE IF NOT EXISTS auth_users (
         username text PRIMARY KEY, salt text, pw_hash text, updated_at timestamptz DEFAULT now())""")
+    # 账号密码用户扩展：显示名/角色/启停/备注/有效期/数据范围(代理商+账户)/登录统计
+    for col,ddl in (("name","text"),("is_admin","boolean DEFAULT false"),("is_active","boolean DEFAULT true"),
+                    ("note","text"),("expires_at","date"),
+                    ("scope_agencies","jsonb DEFAULT '[]'::jsonb"),("scope_accounts","jsonb DEFAULT '[]'::jsonb"),
+                    ("last_login_at","timestamptz"),("login_count","int DEFAULT 0"),("created_at","timestamptz DEFAULT now()")):
+        cur.execute(f"ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS {col} {ddl}")
     cur.execute("SELECT count(*) n FROM auth_users")
     if cur.fetchone()["n"]==0:
         salt=secrets.token_hex(16)
-        cur.execute("INSERT INTO auth_users(username,salt,pw_hash) VALUES(%s,%s,%s)",
-            ("skg", salt, _hash_pw("skg@A168", salt)))
+        cur.execute("INSERT INTO auth_users(username,salt,pw_hash,name,is_admin) VALUES(%s,%s,%s,%s,true)",
+            ("skg", salt, _hash_pw("skg@A168", salt), "主管理员"))
+    else:
+        cur.execute("UPDATE auth_users SET is_admin=true WHERE username='skg'")   # 内置 skg 恒为管理员
     # 用户表：飞书登录用户(开放注册，首次登录自动建号)。与共享密码账户 auth_users 相互独立。
     cur.execute("""CREATE TABLE IF NOT EXISTS users (
         id bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
