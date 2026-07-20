@@ -20,10 +20,15 @@
         </thead>
         <tbody>
           <tr v-for="(r,i) in renderRows" :key="i" :class="'rt-'+r.row_type">
-            <!-- 明细/产品小计：6 个维度列，相同值合并单元格(rowspan) -->
-            <template v-if="r.row_type==='detail' || r.row_type==='subtotal'">
+            <!-- 明细：6 个维度列，相同值合并单元格(rowspan) -->
+            <template v-if="r.row_type==='detail'">
               <td v-for="cell in r._cells" :key="cell.j" :rowspan="cell.span>1 ? cell.span : null"
                 class="dim" :class="{ cat: cell.j===0, prod: cell.j===1, merged: cell.span>1 }">{{ cell.val }}</td>
+            </template>
+            <!-- 产品小计：类目列被上方合并覆盖，「X-小计」跨 产品~代理商 5 列居中 -->
+            <template v-else-if="r.row_type==='subtotal'">
+              <td v-if="r._subCat" :rowspan="r._subCat.span>1 ? r._subCat.span : null" class="dim cat merged">{{ r._subCat.val }}</td>
+              <td class="dim sub-label" colspan="5">{{ r.product }}</td>
             </template>
             <!-- 总计 / 电商平台汇总：首列跨 6 列显示标签 -->
             <template v-else>
@@ -122,10 +127,12 @@ const renderRows = computed(() => {
       i = k
     }
   }
-  for (const r of rows) {                        // 组装维度行要渲染的单元格(仅合并头)
-    if (r.row_type === 'detail' || r.row_type === 'subtotal') {
+  for (const r of rows) {
+    if (r.row_type === 'detail') {                 // 明细行：组装各维度合并头单元格
       r._cells = []
       for (let j = 0; j < 6; j++) if (r['s' + j]) r._cells.push({ j, val: dispVal(r, j), span: r['s' + j] })
+    } else if (r.row_type === 'subtotal') {         // 小计行：类目列通常被上方合并覆盖，产品~代理商合并成一格居中
+      r._subCat = r['s0'] ? { val: dispVal(r, 0), span: r['s0'] } : null
     }
   }
   return rows
@@ -170,6 +177,7 @@ defineExpose({ load })
 .rt-table td.down { color: #d5493f; }
 .rt-table td.warn { color: #d5493f; }
 .rt-table td.label { font-weight: 700; text-align: center; color: #303133; }
+.rt-table td.sub-label { text-align: center; font-weight: 600; }   /* 产品小计标签居中 */
 
 /* 行类型底色（系统中性/蓝色调） */
 .rt-detail:hover td { background: #f5f7fa; }
