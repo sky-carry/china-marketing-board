@@ -25,6 +25,9 @@ const router = createRouter({
 
 // 未登录一律跳登录页；已登录访问登录页则回看板
 router.beforeEach((to) => {
+  // 切页前让当前聚焦元素失焦：否则 el-date-picker/下拉筛选器选完后仍持有焦点，
+  // 其 teleport 到 body 的下拉面板不随切页关闭，切回本页时会再次弹出(bug 修复)
+  if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
   const authed = !!localStorage.getItem('authToken')
   if (!to.meta.public && !authed) return { path: '/login', query: { redirect: to.fullPath } }
   // 已登录访问登录页回看板；但飞书回调带 token(?token=)时要放行，让 Login 存下新 token(否则旧token把新token挡掉)
