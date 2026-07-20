@@ -108,6 +108,55 @@ def change_password(body:dict=Body(...)):
     cur.execute("UPDATE auth_users SET salt=%s,pw_hash=%s,updated_at=now() WHERE username=%s",(salt,_hash_pw(new,salt),u))
     c.close(); return {"ok":True}
 
+# ============================ 自定义列「常用列」预设 ============================
+# 主账号(管理员=密码登录/is_admin)存的预设 is_shared=true，全员可见并可套用；
+# 子账号(普通飞书用户)存的仅自己可见、不共享。删除仅本人或管理员可操作。
+def _req_user(request:Request):
+    auth=request.headers.get("authorization",""); tok=auth[7:] if auth.startswith("Bearer ") else request.cookies.get("token","")
+    d=_token_data(tok) or {}
+    return (d.get("u"), bool(d.get("r")=="admin"))
+
+@app.get("/api/column_presets")
+def list_column_presets(request:Request, page:str):
+    sub,_admin=_req_user(request)
+    c=db(); cur=c.cursor()
+    cur.execute("""SELECT id,page,owner,owner_name,name,is_shared,columns FROM column_presets
+        WHERE page=%s AND (is_shared=true OR owner=%s) ORDER BY is_shared DESC, updated_at DESC""",(page,sub))
+    rows=cur.fetchall(); c.close()
+    for r in rows: r["mine"]=(r["owner"]==sub)   # mine=本人所建(可删)
+    return {"presets":rows}
+
+@app.post("/api/column_presets")
+def save_column_preset(request:Request, body:dict=Body(...)):
+    sub,admin=_req_user(request)
+    if not sub: raise HTTPException(401,"未登录")
+    page=(body.get("page") or "").strip(); name=(body.get("name") or "").strip(); cols=body.get("columns")
+    if not page or not name: raise HTTPException(400,"缺少页面或预设名")
+    if not isinstance(cols,list) or not cols: raise HTTPException(400,"列配置为空")
+    oname=None
+    try:
+        c0=db(); cu0=c0.cursor(); cu0.execute("SELECT name FROM users WHERE open_id=%s",(sub,))
+        r0=cu0.fetchone(); c0.close(); oname=(r0 or {}).get("name")
+    except Exception: pass
+    if not oname: oname="管理员" if admin else sub
+    c=db(); c.autocommit=True; cur=c.cursor()
+    cur.execute("""INSERT INTO column_presets(page,owner,owner_name,name,is_shared,columns)
+        VALUES(%s,%s,%s,%s,%s,%s)
+        ON CONFLICT(page,owner,name) DO UPDATE SET columns=EXCLUDED.columns,
+          is_shared=EXCLUDED.is_shared, owner_name=EXCLUDED.owner_name, updated_at=now()
+        RETURNING id""",
+        (page,sub,oname,name,admin,psycopg2.extras.Json(cols)))
+    pid=cur.fetchone()["id"]; c.close()
+    return {"ok":True,"id":pid,"is_shared":admin}
+
+@app.delete("/api/column_presets/{pid}")
+def delete_column_preset(request:Request, pid:int):
+    sub,admin=_req_user(request)
+    c=db(); c.autocommit=True; cur=c.cursor()
+    if admin: cur.execute("DELETE FROM column_presets WHERE id=%s",(pid,))
+    else:     cur.execute("DELETE FROM column_presets WHERE id=%s AND owner=%s",(pid,sub))
+    c.close(); return {"ok":True}
+
 # ============================ 飞书登录(OAuth) + 本地开发免登录 ============================
 # 配置优先环境变量，其次本地 feishu_config.json(已加入 .git/info/exclude，含 app_secret，勿提交)。
 # app_secret 是敏感信息，任何日志/接口都不回显。
@@ -1019,6 +1068,17 @@ def _ensure_tables():
         source text DEFAULT 'feishu', is_active boolean DEFAULT true, is_admin boolean DEFAULT false,
         first_login_at timestamptz DEFAULT now(), last_login_at timestamptz, login_count int DEFAULT 0,
         created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now())""")
+    # 自定义列「常用列」预设：管理员(主账号)存的 is_shared=true 全员可见；普通用户(子账号)存的仅自己可见
+    cur.execute("""CREATE TABLE IF NOT EXISTS column_presets (
+        id serial PRIMARY KEY,
+        page text NOT NULL,                 -- 页面标识：account_board / orders
+        owner text NOT NULL,                -- 归属用户(token sub：飞书 open_id 或 密码账户 username)
+        owner_name text,                    -- 归属显示名(展示用)
+        name text NOT NULL,                 -- 预设名
+        is_shared boolean DEFAULT false,    -- 是否共享(管理员存的为 true)
+        columns jsonb NOT NULL,             -- 有序列配置 [{key,pinned}]
+        created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now(),
+        UNIQUE(page, owner, name))""")
     c.close()
 
 def _seed_and_schedule():

@@ -84,24 +84,9 @@
       </div>
     </div>
 
-    <!-- 自定义列 弹窗 -->
-    <el-dialog v-model="colDlg" title="自定义列" width="400">
-      <div style="color:#909399;font-size:12px;margin-bottom:10px">勾选控制显示/隐藏，勾「固定」把列固定到左侧（可固定多列），拖动 <b>⣿</b> 调整列顺序。B-G列在账户看板按广告账号配置后自动带出。</div>
-      <div class="col-list">
-        <div v-for="(c,i) in draft" :key="c.key" class="col-item" :class="{dragging:dragIdx===i}"
-          draggable="true" @dragstart="dragStart(i)" @dragover.prevent="dragOver(i)" @drop.prevent @dragend="dragEnd">
-          <span class="drag-handle" title="拖动排序">⣿</span>
-          <el-checkbox v-model="c.visible" style="flex:1">{{ colLabel(c.key) }}<el-tag v-if="COLMAP[c.key]?.bg" size="small" type="warning" effect="plain" style="margin-left:6px">人工</el-tag></el-checkbox>
-          <el-checkbox v-model="c.pinned" size="small" class="pin-cb" title="固定到左侧">📌固定</el-checkbox>
-        </div>
-      </div>
-      <template #footer>
-        <el-button size="small" @click="resetCols">恢复默认</el-button>
-        <span style="flex:1"></span>
-        <el-button size="small" @click="colDlg=false">取消</el-button>
-        <el-button size="small" type="primary" @click="applyCols">应用</el-button>
-      </template>
-    </el-dialog>
+    <!-- 自定义列 弹窗（分类选列 + 拖拽排序 + 固定 + 常用列预设） -->
+    <ColumnCustomizer v-model:visible="colDlg" :model-value="colState" @update:model-value="onColsApply"
+      :columns="COLS" :groups="COL_GROUPS" page="orders" :admin="isAdmin" :default-state="defaultState" />
   </div>
 </template>
 
@@ -111,6 +96,7 @@ import api from '../api'
 import shortcuts from '../shortcuts'
 import { Operation, Download, QuestionFilled } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import ColumnCustomizer from '../components/ColumnCustomizer.vue'
 
 const meta = ref({ platforms: [], types: {}, logins: {} })
 const platforms = computed(() => meta.value.platforms || [])
@@ -168,42 +154,48 @@ function enrich(r) {
 }
 
 // ============ 列定义 & 自定义列 ============
+// group: info=订单信息 / amount=金额与状态 / time=时间与归因（自定义列按此三类分组）
+const COL_GROUPS = [
+  { key:'info',   label:'订单信息' },
+  { key:'amount', label:'金额与状态' },
+  { key:'time',   label:'时间与归因' },
+]
 const COLS = [
-  { key:'platform',        label:'平台',        width:70,  fixed:'left' },
-  { key:'order_type',      label:'订单类型',    width:110, fixed:'left' },
-  { key:'ad_account_name', label:'广告账户名称', minWidth:180 },
-  { key:'ad_account_id',   label:'广告账户ID',  width:150 },
-  { key:'ad_name',         label:'广告名称',    minWidth:180 },
-  { key:'material_name',   label:'视频素材名称', minWidth:160 },
-  { key:'main_order_no',   label:'主订单号',    width:170 },
-  { key:'order_no',        label:'订单号',      width:200 },
-  { key:'product_id',      label:'商品ID',      width:150 },
-  { key:'product_info',    label:'商品信息',    minWidth:240 },
-  { key:'product_price',   label:'商品单价',    width:95,  type:'money' },
-  { key:'pay_amount',      label:'付款金额',    width:100, type:'money', sortable:true },
-  { key:'order_status',    label:'订单状态',    width:90 },
-  { key:'callback_status', label:'回传',        width:80 },
-  { key:'click_time',      label:'点击时间',    width:150, sortable:true },
-  { key:'pay_time',        label:'付款时间',    width:150, sortable:true },
-  { key:'refund_time',     label:'退款时间',    width:150 },
+  { key:'platform',        label:'平台',        width:70,  fixed:'left', group:'info' },
+  { key:'order_type',      label:'订单类型',    width:110, fixed:'left', group:'info' },
+  { key:'ad_account_name', label:'广告账户名称', minWidth:180, group:'info' },
+  { key:'ad_account_id',   label:'广告账户ID',  width:150, group:'info' },
+  { key:'ad_name',         label:'广告名称',    minWidth:180, group:'info' },
+  { key:'material_name',   label:'视频素材名称', minWidth:160, group:'info' },
+  { key:'main_order_no',   label:'主订单号',    width:170, group:'info' },
+  { key:'order_no',        label:'订单号',      width:200, group:'info' },
+  { key:'product_id',      label:'商品ID',      width:150, group:'info' },
+  { key:'product_info',    label:'商品信息',    minWidth:240, group:'info' },
+  { key:'ad_position',     label:'广告投放位置', width:120, group:'info' },
+  { key:'product_price',   label:'商品单价',    width:95,  type:'money', group:'amount' },
+  { key:'pay_amount',      label:'付款金额',    width:100, type:'money', sortable:true, group:'amount' },
+  { key:'order_status',    label:'订单状态',    width:90, group:'amount' },
+  { key:'callback_status', label:'回传',        width:80, group:'amount' },
+  { key:'click_time',      label:'点击时间',    width:150, sortable:true, group:'time' },
+  { key:'pay_time',        label:'付款时间',    width:150, sortable:true, group:'time' },
+  { key:'refund_time',     label:'退款时间',    width:150, group:'time' },
   // 派生字段（前端按时间/状态计算）
-  { key:'click_to_pay',    label:'点击到付款时间', width:120, type:'calc', tip:'付款时间 − 点击时间：用户点击广告后多久下单付款' },
-  { key:'pay_to_refund',   label:'付款到退款时间', width:120, type:'calc', tip:'退款时间 − 付款时间：付款后多久发生退款（无退款则为空）' },
-  { key:'reflow_days',     label:'回流天数',    width:90, type:'calc', tip:'付款日期 − 点击日期（自然日）：0=当天付款，>0=隔天回流' },
-  { key:'same_day_real_pay', label:'是否当天真实付款', width:130, type:'calc', tip:'点击与付款为同一日期，且订单状态为已付款/已完成/支付等付款态 → 是' },
-  { key:'attribution',     label:'归因',        width:70 },
-  { key:'ad_position',     label:'广告投放位置', width:120 },
+  { key:'click_to_pay',    label:'点击到付款时间', width:120, type:'calc', group:'time', tip:'付款时间 − 点击时间：用户点击广告后多久下单付款' },
+  { key:'pay_to_refund',   label:'付款到退款时间', width:120, type:'calc', group:'time', tip:'退款时间 − 付款时间：付款后多久发生退款（无退款则为空）' },
+  { key:'reflow_days',     label:'回流天数',    width:90, type:'calc', group:'time', tip:'付款日期 − 点击日期（自然日）：0=当天付款，>0=隔天回流' },
+  { key:'same_day_real_pay', label:'是否当天真实付款', width:130, type:'calc', group:'time', tip:'点击与付款为同一日期，且订单状态为已付款/已完成/支付等付款态 → 是' },
+  { key:'attribution',     label:'归因',        width:70, group:'time' },
   // B-G 人工列（账户看板配置 → 按广告账号ID绑定）
-  { key:'category',        label:'类目',        width:100, bg:true },
-  { key:'product',         label:'投放产品',    width:110, bg:true },
-  { key:'ecom_platform',   label:'电商平台',    width:100, bg:true },
-  { key:'ad_channel',      label:'投放渠道',    width:100, bg:true },
-  { key:'store',           label:'店铺',        width:120, bg:true },
-  { key:'agency',          label:'代理商',      width:100, bg:true },
+  { key:'category',        label:'类目',        width:100, bg:true, group:'info' },
+  { key:'product',         label:'投放产品',    width:110, bg:true, group:'info' },
+  { key:'ecom_platform',   label:'电商平台',    width:100, bg:true, group:'info' },
+  { key:'ad_channel',      label:'投放渠道',    width:100, bg:true, group:'info' },
+  { key:'store',           label:'店铺',        width:120, bg:true, group:'info' },
+  { key:'agency',          label:'代理商',      width:100, bg:true, group:'info' },
 ]
 const COLMAP = Object.fromEntries(COLS.map(c => [c.key, c]))
 const colLabel = k => COLMAP[k]?.label || k
-const STORAGE = 'ordersCols.v1'
+const STORAGE = 'ordersCols.v2'   // v2：自定义列改版(分类/常用列)
 // pinned: 是否固定到左侧；默认沿用 COLS 里 fixed:'left' 的列
 function defaultState() { return COLS.map(c => ({ key: c.key, visible: true, pinned: c.fixed === 'left' })) }
 function loadState() {
@@ -239,16 +231,11 @@ const visibleColumns = computed(() => {
     .map(c => COLMAP[c.key] ? { ...COLMAP[c.key], width: colWidths.value[c.key] ?? COLMAP[c.key].width, fixed: c.pinned ? 'left' : undefined } : null)
     .filter(Boolean)
 })
-const colDlg = ref(false); const draft = ref([]); const dragIdx = ref(-1)
-function openColDlg() { draft.value = colState.value.map(x => ({ ...x })); colDlg.value = true }
-function dragStart(i) { dragIdx.value = i }
-function dragOver(i) {
-  if (dragIdx.value === -1 || dragIdx.value === i) return
-  const arr = draft.value; const [m] = arr.splice(dragIdx.value, 1); arr.splice(i, 0, m); dragIdx.value = i
-}
-function dragEnd() { dragIdx.value = -1 }
-function applyCols() { colState.value = draft.value.map(x => ({ ...x })); saveState(); colDlg.value = false }
-function resetCols() { draft.value = defaultState() }
+// 自定义列弹窗（复用 ColumnCustomizer 组件：分类选列 + 拖拽排序 + 固定 + 常用列预设）
+const colDlg = ref(false)
+const isAdmin = ref(localStorage.getItem('authAdmin') === '1')
+function openColDlg() { colDlg.value = true }
+function onColsApply(newState) { colState.value = newState; saveState() }
 
 async function load() {
   loading.value = true

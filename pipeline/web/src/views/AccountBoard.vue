@@ -97,24 +97,9 @@
       </div>
     </div>
 
-    <!-- 自定义列 弹窗 -->
-    <el-dialog v-model="colDlg" title="自定义列" width="400">
-      <div style="color:#909399;font-size:12px;margin-bottom:10px">勾选控制显示/隐藏，勾「固定」把列固定到左侧（可固定多列），拖动 <b>⣿</b> 调整列顺序</div>
-      <div class="col-list">
-        <div v-for="(c,i) in draft" :key="c.key" class="col-item" :class="{dragging:dragIdx===i}"
-          draggable="true" @dragstart="dragStart(i)" @dragover.prevent="dragOver(i)" @drop.prevent @dragend="dragEnd">
-          <span class="drag-handle" title="拖动排序">⣿</span>
-          <el-checkbox v-model="c.visible" style="flex:1">{{ colLabel(c.key) }}</el-checkbox>
-          <el-checkbox v-model="c.pinned" size="small" class="pin-cb" title="固定到左侧">📌固定</el-checkbox>
-        </div>
-      </div>
-      <template #footer>
-        <el-button size="small" @click="resetCols">恢复默认</el-button>
-        <span style="flex:1"></span>
-        <el-button size="small" @click="colDlg=false">取消</el-button>
-        <el-button size="small" type="primary" @click="applyCols">应用</el-button>
-      </template>
-    </el-dialog>
+    <!-- 自定义列 弹窗（分类选列 + 拖拽排序 + 固定 + 常用列预设） -->
+    <ColumnCustomizer v-model:visible="colDlg" :model-value="colState" @update:model-value="onColsApply"
+      :columns="COLS" :groups="COL_GROUPS" page="account_board" :admin="isAdmin" :default-state="defaultState" />
   </div>
 </template>
 
@@ -123,6 +108,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import api from '../api'
 import { ElMessage } from 'element-plus'
 import { Operation, Download, QuestionFilled } from '@element-plus/icons-vue'
+import ColumnCustomizer from '../components/ColumnCustomizer.vue'
 
 const platforms = ref(['小飞机','沸点','微橙','麦斯'])
 const platform = ref(''); const range = ref(null); const search = ref('')
@@ -184,42 +170,47 @@ function fmtCell(v, type) {
 }
 
 // ================= 列定义 & 自定义列 =================
+// group: info=账户信息 / front=前端数据 / back=后端产出（自定义列按此三类分组）
+const COL_GROUPS = [
+  { key:'info',  label:'账户信息' },
+  { key:'front', label:'前端数据' },
+  { key:'back',  label:'后端产出' },
+]
 const COLS = [
-  { key:'platform',        label:'平台',        width:80,  type:'text' },
-  { key:'login_account',   label:'登录账号',    width:170, type:'text' },
-  { key:'entity_name',     label:'账户名称',    minWidth:220, type:'text' },
-  { key:'entity_id',       label:'账户ID',      width:150, type:'text' },
-  { key:'cost',            label:'消费(元)',    width:115, type:'money', sortable:true },
-  { key:'impressions',     label:'展示量',      width:100, type:'int',   sortable:true },
-  { key:'clicks',          label:'点击量',      width:90,  type:'int',   sortable:true },
-  { key:'ctr',             label:'点击率(%)',   width:95,  type:'rate' },
-  { key:'cpm',             label:'CPM(元)',     width:95,  type:'money' },
-  { key:'cpc',             label:'CPC(元)',     width:90,  type:'money' },
-  { key:'conversions',     label:'转化数',      width:85,  type:'int' },
-  { key:'conversion_cost', label:'转化成本(元)', width:110, type:'money' },
-  { key:'orders',          label:'订单数',      width:85,  type:'int',   sortable:true },
-  { key:'pay_amount',      label:'付款金额(元)', width:120, type:'money', sortable:true },
-  { key:'roi',             label:'ROI',         width:75,  type:'roi',   sortable:true },
-  { key:'real_pay_amount', label:'真实付款(元)', width:120, type:'money', sortable:true },
-  { key:'real_orders',     label:'真实订单',    width:85,  type:'int' },
-  { key:'real_roi',        label:'真实ROI',     width:85,  type:'roi',   sortable:true },
-  { key:'rt_real_pay',     label:'实时真实付款(元)', width:140, type:'money' },
-  { key:'rt_real_roi',     label:'实时真实ROI', width:115, type:'roi' },
-  { key:'refund_rate',     label:'退款率(%)',   width:95,  type:'rate' },
-  { key:'direct_pay_amount',      label:'直投下单金额(元)', width:130, type:'money', sortable:true },
-  { key:'direct_orders',          label:'直投下单量',      width:100, type:'int',   sortable:true },
-  { key:'direct_roi',             label:'直投下单ROI',     width:105, type:'roi',   sortable:true },
-  { key:'direct_real_pay_amount', label:'直投成交金额(元)', width:130, type:'money', sortable:true },
-  { key:'direct_real_orders',     label:'直投成交量',      width:100, type:'int',   sortable:true },
-  { key:'direct_real_roi',        label:'直投成交ROI',     width:105, type:'roi',   sortable:true },
-  // 投放账户自定义属性（在「账号管理→投放账户管理」编辑），默认隐藏，可在自定义列勾选展示
-  { key:'category',      label:'类目',      width:90,  type:'text', hidden:true },
-  { key:'product',       label:'投放产品',  width:120, type:'text', hidden:true },
-  { key:'ecom_platform', label:'电商平台',  width:90,  type:'text', hidden:true },
-  { key:'ad_channel',    label:'投放渠道',  width:100, type:'text', hidden:true },
-  { key:'store',         label:'店铺',      width:90,  type:'text', hidden:true },
-  { key:'agency',        label:'代理商',    width:120, type:'text', hidden:true },
-  { key:'tags',            label:'标签',        minWidth:160, type:'tags', pin:'right' },
+  { key:'platform',        label:'平台',        width:80,  type:'text', group:'info' },
+  { key:'login_account',   label:'登录账号',    width:170, type:'text', group:'info' },
+  { key:'entity_name',     label:'账户名称',    minWidth:220, type:'text', group:'info' },
+  { key:'entity_id',       label:'账户ID',      width:150, type:'text', group:'info' },
+  { key:'category',      label:'类目',      width:90,  type:'text', group:'info' },
+  { key:'product',       label:'投放产品',  width:120, type:'text', group:'info' },
+  { key:'ecom_platform', label:'电商平台',  width:90,  type:'text', group:'info' },
+  { key:'ad_channel',    label:'投放渠道',  width:100, type:'text', group:'info' },
+  { key:'store',         label:'店铺',      width:90,  type:'text', group:'info' },
+  { key:'agency',        label:'代理商',    width:120, type:'text', group:'info' },
+  { key:'tags',            label:'标签',        minWidth:160, type:'tags', pin:'right', group:'info' },
+  { key:'cost',            label:'消费(元)',    width:115, type:'money', sortable:true, group:'front' },
+  { key:'impressions',     label:'展示量',      width:100, type:'int',   sortable:true, group:'front' },
+  { key:'clicks',          label:'点击量',      width:90,  type:'int',   sortable:true, group:'front' },
+  { key:'ctr',             label:'点击率(%)',   width:95,  type:'rate', group:'front' },
+  { key:'cpm',             label:'CPM(元)',     width:95,  type:'money', group:'front' },
+  { key:'cpc',             label:'CPC(元)',     width:90,  type:'money', group:'front' },
+  { key:'conversions',     label:'转化数',      width:85,  type:'int', group:'front' },
+  { key:'conversion_cost', label:'转化成本(元)', width:110, type:'money', group:'front' },
+  { key:'orders',          label:'订单数',      width:85,  type:'int',   sortable:true, group:'back' },
+  { key:'pay_amount',      label:'付款金额(元)', width:120, type:'money', sortable:true, group:'back' },
+  { key:'roi',             label:'ROI',         width:75,  type:'roi',   sortable:true, group:'back' },
+  { key:'real_pay_amount', label:'真实付款(元)', width:120, type:'money', sortable:true, group:'back' },
+  { key:'real_orders',     label:'真实订单',    width:85,  type:'int', group:'back' },
+  { key:'real_roi',        label:'真实ROI',     width:85,  type:'roi',   sortable:true, group:'back' },
+  { key:'rt_real_pay',     label:'实时真实付款(元)', width:140, type:'money', group:'back' },
+  { key:'rt_real_roi',     label:'实时真实ROI', width:115, type:'roi', group:'back' },
+  { key:'refund_rate',     label:'退款率(%)',   width:95,  type:'rate', group:'back' },
+  { key:'direct_pay_amount',      label:'直投下单金额(元)', width:130, type:'money', sortable:true, group:'back' },
+  { key:'direct_orders',          label:'直投下单量',      width:100, type:'int',   sortable:true, group:'back' },
+  { key:'direct_roi',             label:'直投下单ROI',     width:105, type:'roi',   sortable:true, group:'back' },
+  { key:'direct_real_pay_amount', label:'直投成交金额(元)', width:130, type:'money', sortable:true, group:'back' },
+  { key:'direct_real_orders',     label:'直投成交量',      width:100, type:'int',   sortable:true, group:'back' },
+  { key:'direct_real_roi',        label:'直投成交ROI',     width:105, type:'roi',   sortable:true, group:'back' },
 ]
 const COLMAP = Object.fromEntries(COLS.map(c => [c.key, c]))
 // 计算类/难懂字段的表头说明（悬浮 ? 显示计算口径）
@@ -243,7 +234,7 @@ const TIPS = {
   direct_real_roi: '直投成交ROI = 直投成交金额 / 消费',
 }
 const colLabel = k => COLMAP[k]?.label || k
-const STORAGE = 'accountBoardCols.v1'
+const STORAGE = 'accountBoardCols.v2'   // v2：默认全部列可见 + 自定义列改版(分类/常用列)
 
 // pinned: 用户勾选的左固定；默认沿用 COLS 里 pin:'left' 的列
 function defaultState() { return COLS.map(c => ({ key: c.key, visible: !c.hidden, pinned: c.pin === 'left' })) }
@@ -287,20 +278,11 @@ const visibleColumns = computed(() => {
   }))
 })
 
-// 弹窗 + 拖拽
-const colDlg = ref(false); const draft = ref([]); const dragIdx = ref(-1)
-function openColDlg() { draft.value = colState.value.map(x => ({ ...x })); colDlg.value = true }
-function dragStart(i) { dragIdx.value = i }
-function dragOver(i) {
-  if (dragIdx.value === -1 || dragIdx.value === i) return
-  const arr = draft.value
-  const [moved] = arr.splice(dragIdx.value, 1)
-  arr.splice(i, 0, moved)
-  dragIdx.value = i
-}
-function dragEnd() { dragIdx.value = -1 }
-function applyCols() { colState.value = draft.value.map(x => ({ ...x })); saveState(); colDlg.value = false }
-function resetCols() { draft.value = defaultState() }
+// 自定义列弹窗（复用 ColumnCustomizer 组件：分类选列 + 拖拽排序 + 固定 + 常用列预设）
+const colDlg = ref(false)
+const isAdmin = ref(localStorage.getItem('authAdmin') === '1')
+function openColDlg() { colDlg.value = true }
+function onColsApply(newState) { colState.value = newState; saveState() }
 
 // ================= 数据加载 =================
 async function load() {
