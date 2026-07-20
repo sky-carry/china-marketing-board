@@ -12,7 +12,11 @@
       </div>
       <el-menu :default-active="$route.fullPath" router :collapse="isCollapse" :collapse-transition="false"
         background-color="#20222a" text-color="#c6cad4" active-text-color="#409EFF">
-        <el-menu-item index="/dashboard"><el-icon><TrendCharts /></el-icon><span>数据看板</span></el-menu-item>
+        <el-sub-menu index="dash">
+          <template #title><el-icon><TrendCharts /></el-icon><span>数据看板</span></template>
+          <el-menu-item index="/realtime">实时数据</el-menu-item>
+          <el-menu-item index="/overview">数据总览</el-menu-item>
+        </el-sub-menu>
         <el-menu-item index="/account-board"><el-icon><DataBoard /></el-icon><span>账户看板</span></el-menu-item>
         <el-sub-menu index="platforms">
           <template #title><el-icon><Grid /></el-icon><span>平台明细</span></template>

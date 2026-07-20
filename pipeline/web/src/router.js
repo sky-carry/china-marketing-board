@@ -1,5 +1,6 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import Dashboard from './views/Dashboard.vue'
+import RealtimeBoard from './views/RealtimeBoard.vue'
 import AccountBoard from './views/AccountBoard.vue'
 import PlatformDetail from './views/PlatformDetail.vue'
 import Orders from './views/Orders.vue'
@@ -12,8 +13,10 @@ const router = createRouter({
   history: createWebHashHistory(),
   routes: [
     { path: '/login', component: Login, meta: { public: true, title: '登录' } },
-    { path: '/', redirect: '/dashboard' },
-    { path: '/dashboard', component: Dashboard, meta: { title: '数据看板' } },
+    { path: '/', redirect: '/realtime' },                                   // 访问平台默认落「实时数据」
+    { path: '/realtime', component: RealtimeBoard, meta: { title: '实时数据' } },
+    { path: '/overview', component: Dashboard, meta: { title: '数据总览' } },   // 原数据看板(KPI+趋势)
+    { path: '/dashboard', redirect: '/realtime' },                          // 兼容旧路径
     { path: '/account-board', component: AccountBoard, meta: { title: '账户看板' } },
     { path: '/platform/:name', component: PlatformDetail, meta: { title: '平台明细' } },
     { path: '/orders', component: Orders, meta: { title: '订单明细' } },
@@ -31,9 +34,9 @@ router.beforeEach((to) => {
   const authed = !!localStorage.getItem('authToken')
   if (!to.meta.public && !authed) return { path: '/login', query: { redirect: to.fullPath } }
   // 已登录访问登录页回看板；但飞书回调带 token(?token=)时要放行，让 Login 存下新 token(否则旧token把新token挡掉)
-  if (to.path === '/login' && authed && !to.query.token) return { path: '/dashboard' }
+  if (to.path === '/login' && authed && !to.query.token) return { path: '/realtime' }
   // 管理页(账号管理/用户管理/定时任务)仅管理员可进；非管理员直接回看板(后端也有403兜底)
-  if (to.meta.admin && localStorage.getItem('authAdmin') !== '1') return { path: '/dashboard' }
+  if (to.meta.admin && localStorage.getItem('authAdmin') !== '1') return { path: '/realtime' }
 })
 
 export default router

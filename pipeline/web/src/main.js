@@ -14,3 +14,12 @@ import './style.css'
 const app = createApp(App)
 for (const [k, v] of Object.entries(Icons)) app.component(k, v)
 app.use(ElementPlus, { locale: zhCn }).use(router).mount('#app')
+
+// 切走浏览器标签/窗口时，让当前聚焦元素失焦。否则 el-date-picker 选完日期后输入框仍持有焦点，
+// 回到本标签页时浏览器会自动重新聚焦它 -> Element Plus 又把日期面板弹出来。切走时先失焦即可根治。
+function blurActive() {
+  const el = document.activeElement
+  if (el instanceof HTMLElement && el !== document.body) el.blur()
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') blurActive() })
+window.addEventListener('blur', blurActive)   // 切换到别的应用/窗口时同理

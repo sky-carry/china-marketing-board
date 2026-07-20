@@ -710,6 +710,108 @@ def account_board_meta(platform:str=None):
     return {"accounts":accounts,"meta_options":mopts,
             "meta_fields":[{"key":k,"label":META_LABELS[k]} for k in META_FIELDS]}
 
+# ============================ 实时数据看板（数据看板第一屏） ============================
+# 按「当天在投的账户」自动汇总：类目→产品 分组明细 + 产品小计 + 总计 + 电商平台(渠道)×店铺 汇总。
+# 6 分组维度 = account_meta：类目category/产品product/渠道ecom_platform/店铺store/投放渠道ad_channel/代理商agency
+# 「真实」口径 = 订单表当天真实付款(点击=付款同日且已付款类)，与账户看板「实时真实付款」一致。
+# 「上一个小时消耗」无小时级数据源，返回 None（前端显示 —）。
+@app.get("/api/realtime_board")
+def realtime_board(date:str=None):
+    day = date or datetime.datetime.now(_SH).date().isoformat()
+    yday = (datetime.date.fromisoformat(day) - datetime.timedelta(days=1)).isoformat()
+    c=db(); cur=c.cursor()
+    # 今日各账户 ad_daily 聚合（消耗/直投成交/退款率*消耗）
+    cur.execute(f"""SELECT entity_id, max(entity_name) entity_name, SUM(cost) cost,
+        SUM(direct_real_orders) dro, SUM(direct_real_pay_amount) drp, SUM(refund_rate*cost) rrn
+        FROM ad_daily WHERE level=ANY(%s) AND date=%s AND cost>0 GROUP BY entity_id""",(ACCOUNT_LEVELS,day))
+    today={r["entity_id"]:dict(r) for r in cur.fetchall()}
+    # 昨日各账户消耗
+    cur.execute(f"SELECT entity_id, SUM(cost) cost FROM ad_daily WHERE level=ANY(%s) AND date=%s GROUP BY entity_id",(ACCOUNT_LEVELS,yday))
+    ycost={r["entity_id"]:float(r["cost"] or 0) for r in cur.fetchall()}
+    # 今日/昨日 各账户「当天真实付款」（orders：点击=付款同日 且 已付款类）
+    def rt_by_acct(dd):
+        cur.execute(f"""SELECT o.ad_account_id eid, SUM(o.pay_amount) pay, count(*) n FROM orders o
+            WHERE o.pay_time::date=%s AND o.click_time IS NOT NULL AND o.pay_time::date=o.click_time::date
+              AND o.order_status ~ %s GROUP BY o.ad_account_id""",(dd,_PAID_STATUS_RE))
+        return {r["eid"]:(float(r["pay"] or 0), int(r["n"])) for r in cur.fetchall()}
+    trt=rt_by_acct(day); yrt=rt_by_acct(yday)
+    cur.execute("SELECT * FROM account_meta"); meta={r["entity_id"]:dict(r) for r in cur.fetchall()}
+    cur.execute("SELECT max(fetched_at) t FROM ad_daily WHERE date=%s",(day,)); last_upd=cur.fetchone()["t"]
+    c.close()
+    DIMS=["category","product","ecom_platform","store","ad_channel","agency"]
+    def raw0(): return dict(cost=0.0,real_pay=0.0,real_orders=0,dro=0.0,drp=0.0,rrn=0.0,y_cost=0.0,y_real_pay=0.0)
+    def add(a, eid):
+        t=today[eid]
+        a["cost"]+=float(t["cost"] or 0); a["dro"]+=float(t["dro"] or 0); a["drp"]+=float(t["drp"] or 0)
+        a["rrn"]+=float(t["rrn"] or 0)
+        p,n=trt.get(eid,(0,0)); a["real_pay"]+=p; a["real_orders"]+=n
+        a["y_cost"]+=ycost.get(eid,0); a["y_real_pay"]+=yrt.get(eid,(0,0))[0]
+    def merge(a,b):
+        for k in a: a[k]+=b[k]
+        return a
+    def derive(a):
+        cost=a["cost"]; yc=a["y_cost"]
+        rroi=a["real_pay"]/cost if cost else None
+        yroi=a["y_real_pay"]/yc if yc else None
+        return {
+            "cost":round(a["cost"],2),
+            "real_orders":int(a["real_orders"]),
+            "real_pay":round(a["real_pay"],2),
+            "real_roi":round(rroi,2) if rroi is not None else None,
+            "roi_vs_yesterday":round(rroi-yroi,2) if (rroi is not None and yroi is not None) else None,
+            "refund_rate":round(a["rrn"]/cost,2) if cost else None,
+            "direct_real_orders":int(a["dro"]),
+            "direct_real_pay":round(a["drp"],2),
+            "direct_real_roi":round(a["drp"]/cost,2) if cost else None,
+            "last_hour_cost":None,                       # 无小时级数据
+            "y_cost":round(a["y_cost"],2),
+            "y_real_roi":round(yroi,2) if yroi is not None else None,
+        }
+    # 按 6 维组合聚合（相同属性的账户合并成一行）
+    combos={}
+    for eid in today:
+        m=meta.get(eid) or {}
+        key=tuple((m.get(d) or "").strip() for d in DIMS)
+        combos.setdefault(key, raw0()); add(combos[key], eid)
+    def dimval(key,i): return key[i] or ("未分类" if i==0 else "")
+    rows=[]
+    # —— 类目 → 产品 明细 + 产品小计（未分类类目排最后）——
+    cats=sorted({k[0] for k in combos}, key=lambda x:(x=="" , x))
+    for cat in cats:
+        prods=sorted({k[1] for k in combos if k[0]==cat}, key=lambda x:(x=="", x))
+        for prod in prods:
+            grp=[(k,v) for k,v in combos.items() if k[0]==cat and k[1]==prod]
+            grp.sort(key=lambda kv:kv[0])
+            for k,v in grp:
+                d=derive(v)
+                d.update(row_type="detail", category=cat or "未分类", product=k[1],
+                         ecom_platform=k[2], store=k[3], ad_channel=k[4], agency=k[5])
+                rows.append(d)
+            sub=raw0()
+            for _,v in grp: merge(sub,v)
+            ds=derive(sub); ds.update(row_type="subtotal", category=cat or "未分类",
+                product=(prod or "未命名")+"-小计", ecom_platform="", store="", ad_channel="", agency="")
+            rows.append(ds)
+    # —— 总计 ——
+    tot=raw0()
+    for v in combos.values(): merge(tot,v)
+    dt=derive(tot); dt.update(row_type="total", label="总计"); rows.append(dt)
+    # —— 电商平台(渠道) × 店铺 汇总段：京东盛德 / 京东-小计 / 天猫... ——
+    ecoms=sorted({k[2] for k in combos if k[2]}, key=lambda x:x)
+    for ec in ecoms:
+        stores=sorted({k[3] for k in combos if k[2]==ec}, key=lambda x:(x=="", x))
+        for st in stores:
+            a=raw0()
+            for k,v in combos.items():
+                if k[2]==ec and k[3]==st: merge(a,v)
+            d=derive(a); d.update(row_type="platform", label=f"{ec}{st or '其他'}"); rows.append(d)
+        a=raw0()
+        for k,v in combos.items():
+            if k[2]==ec: merge(a,v)
+        d=derive(a); d.update(row_type="platform_subtotal", label=f"{ec}-小计"); rows.append(d)
+    return {"date":day, "updated_at":fmt_dt(last_upd),
+            "active_accounts":len(today), "rows":rows}
+
 @app.post("/api/account_tags")
 def set_account_tags(body:dict=Body(...)):
     c=db(); c.autocommit=True; cur=c.cursor()
