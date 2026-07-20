@@ -13,7 +13,11 @@
         <div v-for="p in presets" :key="p.id" class="ccp-item" @click="applyPreset(p)">
           <span class="ccp-name" :title="p.name">{{ p.name }}</span>
           <el-tag :type="p.is_shared ? 'success' : 'info'" size="small" effect="plain" class="ccp-tag">{{ p.is_shared ? '共享' : '私有' }}</el-tag>
-          <el-icon v-if="p.mine || admin" class="ccp-del" title="删除该模板" @click.stop="deletePreset(p)"><Delete /></el-icon>
+          <span class="ccp-ops">
+            <el-icon v-if="p.mine || admin" class="ccp-ic" title="编辑该模板" @click.stop="editPreset(p)"><Edit /></el-icon>
+            <el-icon class="ccp-ic" title="复制为新模板" @click.stop="copyPreset(p)"><CopyDocument /></el-icon>
+            <el-icon v-if="p.mine || admin" class="ccp-ic ccp-del" title="删除该模板" @click.stop="deletePreset(p)"><Delete /></el-icon>
+          </span>
         </div>
         <div v-if="!presets.length" class="ccp-empty">暂无模板<br>点右上「自定义列配置」创建并保存</div>
       </div>
@@ -87,7 +91,7 @@
 import { ref, computed } from 'vue'
 import api from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, Delete, Operation } from '@element-plus/icons-vue'
+import { Search, Delete, Operation, Edit, CopyDocument } from '@element-plus/icons-vue'
 
 const props = defineProps({
   modelValue: { type: Array, default: () => [] },   // colState [{key,visible,pinned}]
@@ -133,10 +137,38 @@ function applyPreset(p) {
   pop.value = false
   ElMessage.success(`已按「${p.name}」显示`)
 }
-function openConfig() { pop.value = false; dlg.value = true }
+function openConfig() { pendingEdit.value = null; pop.value = false; dlg.value = true }
+
+// —— 编辑/复制模板 ——
+const pendingEdit = ref(null)   // 打开配置弹窗时若有值，则载入该模板(编辑)而非当前表格状态
+function editPreset(p) {
+  pendingEdit.value = { columns: p.columns || [], name: p.name }
+  pop.value = false; dlg.value = true
+}
+function uniqName(base) {   // 在已有模板名里取不重复的名字：X 副本 / X 副本2 …
+  const names = new Set(presets.value.map(p => p.name))
+  if (!names.has(base)) return base
+  let i = 2; while (names.has(base + i)) i++; return base + i
+}
+async function copyPreset(p) {
+  const name = uniqName((p.name || '模板') + ' 副本')
+  try {
+    await api.post('/column_presets', { page: props.page, name, columns: (p.columns || []).map(x => ({ key: x.key, pinned: !!x.pinned })) })
+    ElMessage.success(`已复制为「${name}」`)
+    await fetchPresets()
+  } catch (e) { ElMessage.error('复制失败：' + (e.response?.data?.detail || e.message)) }
+}
 
 // —— 配置弹窗 ——
-function onDlgOpen() { sel.value = stateToSel(props.modelValue); search.value = ''; saveName.value = '' }
+function onDlgOpen() {
+  search.value = ''
+  if (pendingEdit.value) {   // 编辑模板：载入其列 + 预填名称(保存即覆盖同名)
+    sel.value = pendingEdit.value.columns.filter(x => colMap.value[x.key]).map(x => ({ key: x.key, pinned: !!x.pinned }))
+    saveName.value = pendingEdit.value.name; pendingEdit.value = null
+  } else {                    // 普通打开：以当前表格显示的列为准
+    sel.value = stateToSel(props.modelValue); saveName.value = ''
+  }
+}
 const groupedCols = computed(() => {
   const kw = search.value.trim().toLowerCase()
   return props.groups.map(g => ({
@@ -202,7 +234,9 @@ function apply() { emit('update:modelValue', buildState(sel.value)); dlg.value =
 .ccp-item:hover { background: #ecf5ff; }
 .ccp-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: #303133; }
 .ccp-tag { flex-shrink: 0; }
-.ccp-del { color: #c0c4cc; flex-shrink: 0; }
+.ccp-ops { display: flex; align-items: center; gap: 8px; flex-shrink: 0; margin-left: 4px; }
+.ccp-ic { color: #a8abb2; cursor: pointer; font-size: 15px; }
+.ccp-ic:hover { color: #409EFF; }
 .ccp-del:hover { color: #f56c6c; }
 .ccp-empty { color: #c0c4cc; font-size: 12px; text-align: center; padding: 20px 8px; line-height: 1.8; }
 /* 配置弹窗面板 */
