@@ -198,15 +198,16 @@ function apply() {
 .cc-opt { margin-right: 0; }
 .cc-empty { color: #c0c4cc; font-size: 13px; padding: 12px; text-align: center; }
 /* 下半已选 */
-.cc-selected { min-height: 70px; max-height: 200px; overflow-y: auto; padding: 10px 12px;
-  display: flex; flex-wrap: wrap; gap: 8px; }
-.cc-tag { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border: 1px solid #dcdfe6;
-  border-radius: 6px; background: #fff; cursor: grab; font-size: 13px; }
+.cc-selected { min-height: 70px; max-height: 240px; overflow-y: auto; padding: 10px 12px;
+  display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; align-content: start; }
+.cc-tag { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border: 1px solid #dcdfe6;
+  border-radius: 6px; background: #f5f7fa; cursor: grab; font-size: 13px; min-width: 0; }
 .cc-tag.dragging { opacity: .5; border-color: #409EFF; background: #ecf5ff; }
-.cc-num { color: #909399; font-size: 12px; min-width: 16px; text-align: center; }
-.cc-tag-label { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cc-num { color: #909399; font-size: 12px; min-width: 18px; text-align: right; flex-shrink: 0; }
+.cc-tag-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cc-pin { flex-shrink: 0; }
 .cc-pin :deep(.el-checkbox__label) { padding-left: 4px; font-size: 12px; }
-.cc-del { color: #c0c4cc; cursor: pointer; font-size: 15px; }
+.cc-del { color: #c0c4cc; cursor: pointer; font-size: 15px; flex-shrink: 0; }
 .cc-del:hover { color: #f56c6c; }
 /* footer */
 .cc-footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
