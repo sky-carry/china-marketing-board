@@ -52,14 +52,14 @@
     <div class="card grow">
       <div class="table-wrap">
       <el-table :data="tableData" size="small" border v-loading="loading" height="100%" @sort-change="onSort"
-        :row-class-name="({row})=>row.__total?'total-row':''">
-        <el-table-column label="#" width="48" fixed="left">
+        @header-dragend="onColResize" :row-class-name="({row})=>row.__total?'total-row':''">
+        <el-table-column label="#" :width="colWidths['#'] || 48" fixed="left">
           <template #default="{ row }">
             <span v-if="row.__total">合计</span>
             <span v-else>{{ row.__idx }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="时间" width="180" fixed="left">
+        <el-table-column label="时间" :width="colWidths['时间'] || 180" fixed="left">
           <template #default="{ row }">{{ timeCell(row) }}</template>
         </el-table-column>
         <el-table-column v-for="col in visibleColumns" :key="col.key" :prop="col.key" :label="col.label"
@@ -263,7 +263,17 @@ function loadState() {
 const colState = ref(loadState())
 function saveState() { localStorage.setItem(STORAGE, JSON.stringify(colState.value)) }
 
-// 可见列：用户固定(pinned)的列排最前并固定左；标签(pin:'right')排最后固定右；中间列保持自定义顺序。
+// 列宽持久化：拖拽表头边框后按列 key(数据列)或列名(#/时间)记住，刷新不失效
+const WIDTH_KEY = 'accountBoardColW.v1'
+const colWidths = ref((() => { try { return JSON.parse(localStorage.getItem(WIDTH_KEY)) || {} } catch { return {} } })())
+function onColResize(newW, oldW, column) {
+  const k = column.property || column.label
+  if (!k) return
+  colWidths.value = { ...colWidths.value, [k]: Math.round(newW) }
+  localStorage.setItem(WIDTH_KEY, JSON.stringify(colWidths.value))
+}
+
+// 可见列：用户固定(pinned)的列排最前并固定左；标签(pin:'right')排最后但不固定；中间列保持自定义顺序。
 const visibleColumns = computed(() => {
   const vis = colState.value.filter(c => c.visible)
     .map(c => COLMAP[c.key] ? { ...COLMAP[c.key], _pinned: c.pinned } : null).filter(Boolean)
@@ -271,7 +281,9 @@ const visibleColumns = computed(() => {
   const right = vis.filter(c => !c._pinned && c.pin === 'right')
   const mid = vis.filter(c => !c._pinned && c.pin !== 'right')
   return [...left, ...mid, ...right].map(c => ({
-    ...c, fixed: c._pinned ? 'left' : (c.pin === 'right' ? 'right' : undefined)
+    ...c,
+    width: colWidths.value[c.key] ?? c.width,     // 应用持久化列宽(拖拽后记住)
+    fixed: c._pinned ? 'left' : undefined         // 标签(pin:right)仍排最后，但不再固定右
   }))
 })
 

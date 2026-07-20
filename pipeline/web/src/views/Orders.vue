@@ -56,8 +56,9 @@
 
     <div class="card grow">
       <div class="table-wrap">
-        <el-table :data="rows" size="small" border v-loading="loading" height="100%" @sort-change="onSort">
-          <el-table-column type="index" label="#" width="46" :index="i=>i+1+(page-1)*pageSize" fixed="left" />
+        <el-table :data="rows" size="small" border v-loading="loading" height="100%" @sort-change="onSort"
+          @header-dragend="onColResize">
+          <el-table-column type="index" label="#" :width="colWidths['#'] || 46" :index="i=>i+1+(page-1)*pageSize" fixed="left" />
           <el-table-column v-for="col in visibleColumns" :key="col.key" :prop="col.key" :label="col.label"
             :width="col.width" :min-width="col.minWidth" :fixed="col.fixed"
             :sortable="col.sortable ? 'custom' : false"
@@ -220,11 +221,22 @@ function loadState() {
 }
 const colState = ref(loadState())
 function saveState() { localStorage.setItem(STORAGE, JSON.stringify(colState.value)) }
+
+// 列宽持久化：拖拽表头边框后按列 key(数据列)或列名(#)记住，刷新不失效
+const WIDTH_KEY = 'ordersColW.v1'
+const colWidths = ref((() => { try { return JSON.parse(localStorage.getItem(WIDTH_KEY)) || {} } catch { return {} } })())
+function onColResize(newW, oldW, column) {
+  const k = column.property || column.label
+  if (!k) return
+  colWidths.value = { ...colWidths.value, [k]: Math.round(newW) }
+  localStorage.setItem(WIDTH_KEY, JSON.stringify(colWidths.value))
+}
+
 const visibleColumns = computed(() => {
   const vis = colState.value.filter(c => c.visible)
   const pinned = vis.filter(c => c.pinned), rest = vis.filter(c => !c.pinned)   // 固定列排最前, 便于 el-table 左固定连续
   return [...pinned, ...rest]
-    .map(c => COLMAP[c.key] ? { ...COLMAP[c.key], fixed: c.pinned ? 'left' : undefined } : null)
+    .map(c => COLMAP[c.key] ? { ...COLMAP[c.key], width: colWidths.value[c.key] ?? COLMAP[c.key].width, fixed: c.pinned ? 'left' : undefined } : null)
     .filter(Boolean)
 })
 const colDlg = ref(false); const draft = ref([]); const dragIdx = ref(-1)
