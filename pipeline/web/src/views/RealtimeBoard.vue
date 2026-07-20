@@ -160,7 +160,7 @@ defineExpose({ load })
   font-weight: 600; text-align: center; border-bottom: 1px solid #dcdfe6;
 }
 .rt-table td.dim { text-align: left; color: #303133; vertical-align: middle; }
-.rt-table td.merged { background: #fff; }   /* 合并单元格用白底，视觉更干净 */
+.rt-table td.merged { background: #fff; text-align: center; }   /* 合并单元格白底+居中 */
 .rt-table td.num { text-align: right; color: #303133; font-variant-numeric: tabular-nums; }
 .rt-table td.cat { font-weight: 600; color: #303133; }
 .rt-table td.prod { color: #606266; }
@@ -169,13 +169,13 @@ defineExpose({ load })
 .rt-table td.up { color: #2e9b5b; }
 .rt-table td.down { color: #d5493f; }
 .rt-table td.warn { color: #d5493f; }
-.rt-table td.label { font-weight: 700; text-align: right; color: #303133; }
+.rt-table td.label { font-weight: 700; text-align: center; color: #303133; }
 
 /* 行类型底色（系统中性/蓝色调） */
 .rt-detail:hover td { background: #f5f7fa; }
-.rt-subtotal td { background: #f4f4f5; font-weight: 600; }
+.rt-subtotal td { background: #e4e7ed; font-weight: 600; }
 .rt-total td { background: #ecf5ff; font-weight: 700; font-size: 12.5px; }
 .rt-platform td { background: #fafafa; }
-.rt-platform_subtotal td { background: #eef1f6; font-weight: 700; }
+.rt-platform_subtotal td { background: #dbe1ea; font-weight: 700; }
 .rt-empty { padding: 40px; text-align: center; color: #909399; }
 </style>
