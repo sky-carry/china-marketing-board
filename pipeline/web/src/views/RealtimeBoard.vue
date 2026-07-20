@@ -4,7 +4,7 @@
     <div class="rt-title">
       <span>SKG 站外投放 {{ dateText }}<span class="rt-time"> {{ timeText }}</span></span>
       <span class="rt-actions">
-        <span class="rt-meta">当日在投 {{ data.active_accounts || 0 }} 个账户 · 每3分钟自动刷新</span>
+        <span class="rt-meta">当日在投 {{ data.active_accounts || 0 }} 个账户 · 每5分钟自动刷新</span>
         <el-button size="small" text @click="load" :loading="loading" style="color:#fff">
           <el-icon><Refresh /></el-icon>刷新
         </el-button>
@@ -20,14 +20,10 @@
         </thead>
         <tbody>
           <tr v-for="(r,i) in renderRows" :key="i" :class="'rt-'+r.row_type">
-            <!-- 明细/产品小计：6 个维度列 -->
+            <!-- 明细/产品小计：6 个维度列，相同值合并单元格(rowspan) -->
             <template v-if="r.row_type==='detail' || r.row_type==='subtotal'">
-              <td class="dim cat">{{ r._cat }}</td>
-              <td class="dim prod">{{ r._prod }}</td>
-              <td class="dim">{{ r.ecom_platform }}</td>
-              <td class="dim">{{ r.store }}</td>
-              <td class="dim">{{ r.ad_channel }}</td>
-              <td class="dim">{{ r.agency }}</td>
+              <td v-for="cell in r._cells" :key="cell.j" :rowspan="cell.span>1 ? cell.span : null"
+                class="dim" :class="{ cat: cell.j===0, prod: cell.j===1, merged: cell.span>1 }">{{ cell.val }}</td>
             </template>
             <!-- 总计 / 电商平台汇总：首列跨 6 列显示标签 -->
             <template v-else>
@@ -105,19 +101,34 @@ const timeText = computed(() => {
   return h!=null ? `${h}时${mi}分` : ''
 })
 
-// 明细/小计的 类目、产品 列做「相同则留空」的分组显示（视觉上归并）
+// 6 维度列合并单元格：相邻行「前缀维度值全等」则纵向合并(rowspan)，层级式(Excel 风)
+const DIM_KEYS = ['category', 'product', 'ecom_platform', 'store', 'ad_channel', 'agency']
+function dispVal(r, j) {                          // 该行第 j 维用于合并判断/显示的值；非维度行返回 null
+  if (r.row_type !== 'detail' && r.row_type !== 'subtotal') return null
+  if (r.row_type === 'subtotal') return j === 0 ? (r.category || '未分类') : (j === 1 ? r.product : '')
+  return j === 0 ? (r.category || '未分类') : (r[DIM_KEYS[j]] ?? '')
+}
 const renderRows = computed(() => {
-  let lastCat = null, lastProd = null
-  return (data.value.rows || []).map(r => {
-    const o = { ...r }
+  const rows = (data.value.rows || []).map(r => ({ ...r }))
+  for (let j = 0; j < 6; j++) {                  // 逐维计算 rowspan
+    let i = 0
+    while (i < rows.length) {
+      if (dispVal(rows[i], j) === null) { rows[i]['s' + j] = null; i++; continue }
+      let k = i + 1
+      while (k < rows.length && dispVal(rows[k], j) !== null &&
+             Array.from({ length: j + 1 }).every((_, jj) => dispVal(rows[k], jj) === dispVal(rows[i], jj))) k++
+      rows[i]['s' + j] = k - i
+      for (let m = i + 1; m < k; m++) rows[m]['s' + j] = 0   // 被合并掉的行不渲染该单元格
+      i = k
+    }
+  }
+  for (const r of rows) {                        // 组装维度行要渲染的单元格(仅合并头)
     if (r.row_type === 'detail' || r.row_type === 'subtotal') {
-      o._cat = r.category !== lastCat ? r.category : ''
-      lastCat = r.category
-      if (r.row_type === 'subtotal') { o._prod = r.product; lastProd = null }   // 小计行单独显示「X-小计」
-      else { const pk = r.category + '|' + r.product; o._prod = pk !== lastProd ? r.product : ''; lastProd = pk }
-    } else { lastCat = null; lastProd = null }
-    return o
-  })
+      r._cells = []
+      for (let j = 0; j < 6; j++) if (r['s' + j]) r._cells.push({ j, val: dispVal(r, j), span: r['s' + j] })
+    }
+  }
+  return rows
 })
 
 let timer = null
@@ -126,7 +137,7 @@ async function load() {
   try { const { data: d } = await api.get('/realtime_board'); data.value = d }
   finally { loading.value = false }
 }
-onMounted(() => { load(); timer = setInterval(load, 180000) })   // 每 3 分钟自动刷新
+onMounted(() => { load(); timer = setInterval(load, 300000) })   // 每 5 分钟自动刷新(对齐抓取节奏)
 onBeforeUnmount(() => { if (timer) clearInterval(timer) })
 defineExpose({ load })
 </script>
@@ -134,7 +145,7 @@ defineExpose({ load })
 <style scoped>
 .rt-wrap { display: flex; flex-direction: column; height: 100%; min-height: 0; background: #fff; }
 .rt-title {
-  background: rgb(32, 18, 77); color: #fff; font-size: 18px; font-weight: 700;
+  background: #20222a; color: #fff; font-size: 18px; font-weight: 700;
   padding: 10px 16px; display: flex; align-items: center; justify-content: space-between; flex: none;
 }
 .rt-time { font-weight: 400; opacity: .85; font-size: 15px; }
@@ -143,27 +154,28 @@ defineExpose({ load })
 .rt-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; }
 
 .rt-table { border-collapse: collapse; width: 100%; font-size: 12px; white-space: nowrap; }
-.rt-table th, .rt-table td { border: 1px solid #d9d2ea; padding: 5px 8px; }
+.rt-table th, .rt-table td { border: 1px solid #ebeef5; padding: 5px 8px; }
 .rt-table thead th {
-  position: sticky; top: 0; z-index: 2; background: rgb(50, 34, 100); color: #fff;
-  font-weight: 600; text-align: center;
+  position: sticky; top: 0; z-index: 2; background: #f5f7fa; color: #303133;
+  font-weight: 600; text-align: center; border-bottom: 1px solid #dcdfe6;
 }
-.rt-table td.dim { text-align: left; color: #303133; }
+.rt-table td.dim { text-align: left; color: #303133; vertical-align: middle; }
+.rt-table td.merged { background: #fff; }   /* 合并单元格用白底，视觉更干净 */
 .rt-table td.num { text-align: right; color: #303133; font-variant-numeric: tabular-nums; }
-.rt-table td.cat { font-weight: 600; color: #20124d; }
+.rt-table td.cat { font-weight: 600; color: #303133; }
 .rt-table td.prod { color: #606266; }
 .rt-table td.strong { font-weight: 600; }
 .rt-table td.muted { color: #c0c4cc; text-align: center; }
 .rt-table td.up { color: #2e9b5b; }
 .rt-table td.down { color: #d5493f; }
 .rt-table td.warn { color: #d5493f; }
-.rt-table td.label { font-weight: 700; text-align: right; color: #20124d; }
+.rt-table td.label { font-weight: 700; text-align: right; color: #303133; }
 
-/* 行类型底色 */
-.rt-detail:hover td { background: #f5f2fb; }
-.rt-subtotal td { background: #efeaf8; font-weight: 600; }
-.rt-total td { background: #ddd2f2; font-weight: 700; font-size: 12.5px; }
-.rt-platform td { background: #f7f9fc; }
-.rt-platform_subtotal td { background: #e6ecf6; font-weight: 700; }
+/* 行类型底色（系统中性/蓝色调） */
+.rt-detail:hover td { background: #f5f7fa; }
+.rt-subtotal td { background: #f4f4f5; font-weight: 600; }
+.rt-total td { background: #ecf5ff; font-weight: 700; font-size: 12.5px; }
+.rt-platform td { background: #fafafa; }
+.rt-platform_subtotal td { background: #eef1f6; font-weight: 700; }
 .rt-empty { padding: 40px; text-align: center; color: #909399; }
 </style>
