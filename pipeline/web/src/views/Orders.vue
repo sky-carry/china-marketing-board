@@ -48,7 +48,8 @@
           </el-select>
         </div>
         <el-button size="small" type="primary" @click="reload">查询</el-button>
-        <el-button size="small" @click="openColDlg"><el-icon style="margin-right:4px"><Operation /></el-icon>自定义列</el-button>
+        <ColumnCustomizer :model-value="colState" @update:model-value="onColsApply"
+          :columns="COLS" :groups="COL_GROUPS" page="orders" :admin="isAdmin" :default-state="defaultState" />
         <el-button size="small" type="success" plain @click="exportXlsx" :loading="exporting"><el-icon style="margin-right:4px"><Download /></el-icon>导出数据</el-button>
         <span style="color:#909399;font-size:12px">共 {{ total.toLocaleString() }} 单 · 付款合计 ¥{{ money(sumPay) }}</span>
       </div>
@@ -84,9 +85,6 @@
       </div>
     </div>
 
-    <!-- 自定义列 弹窗（分类选列 + 拖拽排序 + 固定 + 常用列预设） -->
-    <ColumnCustomizer v-model:visible="colDlg" :model-value="colState" @update:model-value="onColsApply"
-      :columns="COLS" :groups="COL_GROUPS" page="orders" :admin="isAdmin" :default-state="defaultState" />
   </div>
 </template>
 
@@ -94,7 +92,7 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import api from '../api'
 import shortcuts from '../shortcuts'
-import { Operation, Download, QuestionFilled } from '@element-plus/icons-vue'
+import { Download, QuestionFilled } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import ColumnCustomizer from '../components/ColumnCustomizer.vue'
 
@@ -231,10 +229,8 @@ const visibleColumns = computed(() => {
     .map(c => COLMAP[c.key] ? { ...COLMAP[c.key], width: colWidths.value[c.key] ?? COLMAP[c.key].width, fixed: c.pinned ? 'left' : undefined } : null)
     .filter(Boolean)
 })
-// 自定义列弹窗（复用 ColumnCustomizer 组件：分类选列 + 拖拽排序 + 固定 + 常用列预设）
-const colDlg = ref(false)
+// 自定义列（复用 ColumnCustomizer 组件：自带按钮+下拉模板+配置弹窗）
 const isAdmin = ref(localStorage.getItem('authAdmin') === '1')
-function openColDlg() { colDlg.value = true }
 function onColsApply(newState) { colState.value = newState; saveState() }
 
 async function load() {

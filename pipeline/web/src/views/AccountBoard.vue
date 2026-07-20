@@ -43,7 +43,8 @@
             @keyup.enter="reload" @clear="reload" />
         </div>
         <el-button size="small" type="primary" @click="reload">查询</el-button>
-        <el-button size="small" @click="openColDlg"><el-icon style="margin-right:4px"><Operation /></el-icon>自定义列</el-button>
+        <ColumnCustomizer :model-value="colState" @update:model-value="onColsApply"
+          :columns="COLS" :groups="COL_GROUPS" page="account_board" :admin="isAdmin" :default-state="defaultState" />
         <el-button size="small" type="success" plain :loading="exporting" @click="exportCsv"><el-icon style="margin-right:4px"><Download /></el-icon>导出数据</el-button>
         <span style="color:#909399;font-size:12px">共 {{ total }} {{ MODE_UNIT[mode] }} · {{ MODE_DESC[mode] }} · 末列可给账户打标签</span>
       </div>
@@ -97,9 +98,6 @@
       </div>
     </div>
 
-    <!-- 自定义列 弹窗（分类选列 + 拖拽排序 + 固定 + 常用列预设） -->
-    <ColumnCustomizer v-model:visible="colDlg" :model-value="colState" @update:model-value="onColsApply"
-      :columns="COLS" :groups="COL_GROUPS" page="account_board" :admin="isAdmin" :default-state="defaultState" />
   </div>
 </template>
 
@@ -107,7 +105,7 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import api from '../api'
 import { ElMessage } from 'element-plus'
-import { Operation, Download, QuestionFilled } from '@element-plus/icons-vue'
+import { Download, QuestionFilled } from '@element-plus/icons-vue'
 import ColumnCustomizer from '../components/ColumnCustomizer.vue'
 
 const platforms = ref(['小飞机','沸点','微橙','麦斯'])
@@ -278,10 +276,8 @@ const visibleColumns = computed(() => {
   }))
 })
 
-// 自定义列弹窗（复用 ColumnCustomizer 组件：分类选列 + 拖拽排序 + 固定 + 常用列预设）
-const colDlg = ref(false)
+// 自定义列（复用 ColumnCustomizer 组件：自带按钮+下拉模板+配置弹窗）
 const isAdmin = ref(localStorage.getItem('authAdmin') === '1')
-function openColDlg() { colDlg.value = true }
 function onColsApply(newState) { colState.value = newState; saveState() }
 
 // ================= 数据加载 =================
