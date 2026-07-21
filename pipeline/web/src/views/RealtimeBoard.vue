@@ -2,7 +2,7 @@
   <div class="rt-wrap">
     <!-- 标题栏（深紫，随当天日期/更新时间） -->
     <div class="rt-title">
-      <span>SKG 站外投放 {{ dateText }}<span class="rt-time"> {{ timeText }}</span></span>
+      <span class="rt-heading">SKG 站外投放 {{ dateText }}<span class="rt-time"> {{ timeText }}</span></span>
       <span class="rt-actions">
         <span class="rt-meta">当日在投 {{ data.active_accounts || 0 }} 个账户 · 每5分钟自动刷新</span>
         <el-button size="small" text @click="load" :loading="loading" style="color:#fff">
@@ -43,7 +43,6 @@
             <td class="num">{{ int(r.direct_real_orders) }}</td>
             <td class="num">{{ money(r.direct_real_pay) }}</td>
             <td class="num">{{ roi(r.direct_real_roi) }}</td>
-            <td class="num muted">—</td>
             <td class="num">{{ money(r.y_cost) }}</td>
             <td class="num">{{ roi(r.y_real_roi) }}</td>
           </tr>
@@ -76,7 +75,6 @@ const COLS = [
   { key:'direct_real_orders', label:'直投成交量', w:86 },
   { key:'direct_real_pay', label:'直投成交金额', w:104 },
   { key:'direct_real_roi', label:'直投成交ROI', w:96 },
-  { key:'last_hour_cost', label:'上一个小时消耗', w:110 },
   { key:'y_cost',      label:'昨日总消耗', w:100 },
   { key:'y_real_roi',  label:'昨日真实ROI', w:96 },
 ]
@@ -153,23 +151,24 @@ defineExpose({ load })
 .rt-wrap { display: flex; flex-direction: column; height: 100%; min-height: 0; background: #fff; }
 .rt-title {
   background: #20222a; color: #fff; font-size: 18px; font-weight: 700;
-  padding: 10px 16px; display: flex; align-items: center; justify-content: space-between; flex: none;
+  padding: 10px 16px; display: flex; align-items: center; justify-content: center; flex: none; position: relative;
 }
-.rt-time { font-weight: 400; opacity: .85; font-size: 15px; }
-.rt-actions { display: flex; align-items: center; gap: 12px; }
+.rt-heading { text-align: center; }
+.rt-time { font-weight: 400; opacity: .9; font-size: 18px; }
+.rt-actions { display: flex; align-items: center; gap: 12px; position: absolute; right: 16px; top: 50%; transform: translateY(-50%); }
 .rt-meta { font-size: 12px; font-weight: 400; opacity: .8; }
 .rt-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; }
 
 .rt-table { border-collapse: collapse; width: 100%; font-size: 12px; white-space: nowrap; }
-.rt-table th, .rt-table td { border: 1px solid #ebeef5; padding: 5px 8px; }
+.rt-table th, .rt-table td { border: 1px solid #b8bcc4; padding: 5px 8px; }   /* 边框偏深，便于分辨数据 */
 .rt-table thead th {
   position: sticky; top: 0; z-index: 2; background: #f5f7fa; color: #303133;
-  font-weight: 600; text-align: center; border-bottom: 1px solid #dcdfe6;
+  font-weight: 600; text-align: center; border-bottom: 1px solid #a8abb2;
 }
-.rt-table td.dim { text-align: left; color: #303133; vertical-align: middle; }
+.rt-table td.dim { text-align: center; color: #303133; vertical-align: middle; }   /* 所有文字居中 */
 .rt-table td.merged { background: #fff; text-align: center; }   /* 合并单元格白底+居中 */
-.rt-table td.num { text-align: right; color: #303133; font-variant-numeric: tabular-nums; }
-.rt-table td.cat { font-weight: 600; color: #303133; }
+.rt-table td.num { text-align: center; color: #303133; font-variant-numeric: tabular-nums; }
+.rt-table td.cat { font-weight: 600; color: #303133; background: #eef1f6; }   /* 类目列底色填充 */
 .rt-table td.prod { color: #606266; }
 .rt-table td.strong { font-weight: 600; }
 .rt-table td.muted { color: #c0c4cc; text-align: center; }
