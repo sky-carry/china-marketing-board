@@ -295,7 +295,7 @@ onMounted(async () => {
 .drag-handle { cursor: grab; color: #c0c4cc; font-size: 14px; user-select: none; letter-spacing: -2px; }
 .col-item:hover .drag-handle { color: #909399; }
 /* 投放属性筛选：两两一组，用底色分成三组 */
-.meta-group { display: flex; gap: 12px; align-items: flex-end; padding: 6px 10px; border-radius: 8px; border: 1px solid transparent; }
+.meta-group { display: flex; gap: 12px; align-items: flex-end; padding: 0 10px; border-radius: 8px; border: none; }
 .mg-a { background: #ecf5ff; border-color: #d3e9ff; }   /* 蓝：类目/产品 */
 .mg-b { background: #f0f9eb; border-color: #e1f0d6; }   /* 绿：电商平台/店铺 */
 .mg-c { background: #fdf6ec; border-color: #f7e6c8; }   /* 橙：投放渠道/代理商 */
