@@ -10,7 +10,7 @@
           <Expand v-if="isCollapse" /><Fold v-else />
         </el-icon>
       </div>
-      <el-menu :default-active="$route.fullPath" router :collapse="isCollapse" :collapse-transition="false"
+      <el-menu :default-active="$route.path" router :collapse="isCollapse" :collapse-transition="false"
         background-color="#20222a" text-color="#c6cad4" active-text-color="#409EFF">
         <el-menu-item index="/board"><el-icon><TrendCharts /></el-icon><span>数据看板</span></el-menu-item>
         <el-menu-item index="/account-board"><el-icon><DataBoard /></el-icon><span>账户看板</span></el-menu-item>
@@ -27,7 +27,11 @@
     </el-aside>
     <el-container>
       <el-header style="background:#fff;border-bottom:1px solid #ebeef5;display:flex;align-items:center;justify-content:space-between">
-        <span style="font-size:16px;font-weight:600">{{ headerTitle }}</span>
+        <div v-if="isBoard" class="hdr-tabs">
+          <button :class="{ active: boardTab==='realtime' }" @click="setBoardTab('realtime')">实时数据</button>
+          <button :class="{ active: boardTab==='overview' }" @click="setBoardTab('overview')">数据总览</button>
+        </div>
+        <span v-else style="font-size:16px;font-weight:600">{{ headerTitle }}</span>
         <el-dropdown @command="onCmd">
           <span style="cursor:pointer;color:#606266;font-size:14px;display:flex;align-items:center;gap:6px">
             <el-avatar v-if="me.avatar_url" :size="26" :src="me.avatar_url" />
@@ -72,6 +76,10 @@ const username = ref(localStorage.getItem('authUser') || 'skg')
 const me = ref({})   // 当前登录用户(飞书资料，来自 /api/me)
 const isAdmin = ref(localStorage.getItem('authAdmin') === '1')   // 管理员(密码登录/授权) 才显示管理页
 const headerTitle = computed(() => route.params.name ? `平台明细 · ${route.params.name}` : route.meta.title)
+// 数据看板：header 里显示「实时数据/数据总览」标签，用 route.query.tab 驱动内容
+const isBoard = computed(() => route.path === '/board')
+const boardTab = computed(() => (route.query.tab === 'overview' ? 'overview' : 'realtime'))
+function setBoardTab(t) { router.push({ path: '/board', query: t === 'realtime' ? {} : { tab: t } }) }
 
 const pwdDlg = ref(false); const pwd = reactive({ old: '', new: '' })
 function onCmd(cmd) {
@@ -114,4 +122,12 @@ onMounted(async () => {
 .collapse-btn:hover { color: #409EFF; }
 /* 折叠态：菜单收成 64px 窄条，图标居中 */
 .el-menu--collapse { border-right: none; }
+/* 数据看板 header 顶部标签（实时数据/数据总览） */
+.hdr-tabs { display: flex; gap: 8px; }
+.hdr-tabs button {
+  border: none; background: transparent; font-size: 15px; font-weight: 600; color: #606266;
+  cursor: pointer; padding: 6px 18px; border-radius: 6px; transition: all .15s;
+}
+.hdr-tabs button:hover:not(.active) { background: #f5f7fa; color: #303133; }
+.hdr-tabs button.active { color: #fff; background: #20222a; }
 </style>
