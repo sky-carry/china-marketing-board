@@ -24,6 +24,21 @@
           </el-select>
         </div>
         <div>
+          <div class="lbl">日期范围</div>
+          <el-date-picker v-model="range" type="daterange" size="small" value-format="YYYY-MM-DD"
+            :shortcuts="shortcuts" start-placeholder="开始" end-placeholder="结束" style="width:230px" @change="reload" />
+        </div>
+        <!-- 6 个投放属性筛选，两两一组、用底色分成三组 -->
+        <div v-for="g in metaGroups" :key="g.cls" class="meta-group" :class="g.cls">
+          <div v-for="f in g.fields" :key="f.key">
+            <div class="lbl">{{ f.label }}</div>
+            <el-select v-model="metaFilter[f.key]" size="small" style="width:120px" multiple filterable clearable
+              collapse-tags collapse-tags-tooltip :placeholder="'全部'+f.label" @change="reload">
+              <el-option v-for="o in (metaOptions[f.key]||[])" :key="o" :label="o" :value="o" />
+            </el-select>
+          </div>
+        </div>
+        <div>
           <div class="lbl">广告账户名称</div>
           <el-select v-model="accountFilter" size="small" style="width:200px" multiple filterable clearable
             collapse-tags collapse-tags-tooltip placeholder="全部账户" @change="reload">
@@ -31,21 +46,9 @@
           </el-select>
         </div>
         <div>
-          <div class="lbl">日期范围</div>
-          <el-date-picker v-model="range" type="daterange" size="small" value-format="YYYY-MM-DD"
-            :shortcuts="shortcuts" start-placeholder="开始" end-placeholder="结束" style="width:230px" @change="reload" />
-        </div>
-        <div>
           <div class="lbl">搜索 订单号/账户/商品</div>
           <el-input v-model="search" size="small" style="width:180px" clearable placeholder="回车搜索"
             @keyup.enter="reload" @clear="reload" />
-        </div>
-        <div v-for="f in metaFields" :key="f.key">
-          <div class="lbl">{{ f.label }}</div>
-          <el-select v-model="metaFilter[f.key]" size="small" style="width:130px" multiple filterable clearable
-            collapse-tags collapse-tags-tooltip :placeholder="'全部'+f.label" @change="reload">
-            <el-option v-for="o in (metaOptions[f.key]||[])" :key="o" :label="o" :value="o" />
-          </el-select>
         </div>
         <el-button size="small" type="primary" @click="reload">查询</el-button>
         <ColumnCustomizer :model-value="colState" @update:model-value="onColsApply"
@@ -105,6 +108,17 @@ const accountOptions = computed(() => meta.value.accounts || [])
 const metaFilter = reactive({ category: [], product: [], ecom_platform: [], ad_channel: [], store: [], agency: [] })
 const metaFields = computed(() => meta.value.meta_fields || [])
 const metaOptions = computed(() => meta.value.meta_options || {})
+// 6 个投放属性两两分 3 组(各一底色)：类目/产品、电商平台/店铺、投放渠道/代理商
+const META_GROUPS = [
+  { cls: 'mg-a', keys: ['category', 'product'] },
+  { cls: 'mg-b', keys: ['ecom_platform', 'store'] },
+  { cls: 'mg-c', keys: ['ad_channel', 'agency'] },
+]
+const metaGroups = computed(() => {
+  const byKey = Object.fromEntries(metaFields.value.map(f => [f.key, f]))
+  return META_GROUPS.map(g => ({ cls: g.cls, fields: g.keys.map(k => byKey[k]).filter(Boolean) }))
+    .filter(g => g.fields.length)
+})
 // 组装筛选参数：账户名称 + 6 属性，均为多选数组，空则不传（axios 已配置数组序列化为 key=a&key=b）
 function metaParams() {
   const p = {}
@@ -280,4 +294,9 @@ onMounted(async () => {
 .col-item.dragging { opacity: .5; border-color: #409EFF; background: #ecf5ff; }
 .drag-handle { cursor: grab; color: #c0c4cc; font-size: 14px; user-select: none; letter-spacing: -2px; }
 .col-item:hover .drag-handle { color: #909399; }
+/* 投放属性筛选：两两一组，用底色分成三组 */
+.meta-group { display: flex; gap: 12px; align-items: flex-end; padding: 6px 10px; border-radius: 8px; border: 1px solid transparent; }
+.mg-a { background: #ecf5ff; border-color: #d3e9ff; }   /* 蓝：类目/产品 */
+.mg-b { background: #f0f9eb; border-color: #e1f0d6; }   /* 绿：电商平台/店铺 */
+.mg-c { background: #fdf6ec; border-color: #f7e6c8; }   /* 橙：投放渠道/代理商 */
 </style>
