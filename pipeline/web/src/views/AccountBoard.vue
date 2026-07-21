@@ -188,11 +188,36 @@ const COL_GROUPS = [
   { key:'front', label:'前端数据' },
   { key:'back',  label:'后端产出' },
 ]
+// 顺序/命名按飞书「技术看板字段更新」sheet；投放属性列放末尾
 const COLS = [
-  { key:'platform',        label:'平台',        width:80,  type:'text', group:'info' },
+  { key:'platform',        label:'看板平台',    width:90,  type:'text', group:'info' },
   { key:'login_account',   label:'登录账号',    width:170, type:'text', group:'info' },
   { key:'entity_name',     label:'账户名称',    minWidth:220, type:'text', group:'info' },
   { key:'entity_id',       label:'账户ID',      width:150, type:'text', group:'info' },
+  { key:'cost',            label:'消耗',        width:110, type:'money', sortable:true, group:'front' },
+  { key:'impressions',     label:'展示量',      width:100, type:'int',   sortable:true, group:'front' },
+  { key:'clicks',          label:'点击量',      width:90,  type:'int',   sortable:true, group:'front' },
+  { key:'ctr',             label:'点击率',      width:90,  type:'rate', group:'front' },
+  { key:'cpm',             label:'CPM',         width:90,  type:'money', group:'front' },
+  { key:'cpc',             label:'CPC',         width:85,  type:'money', group:'front' },
+  { key:'conversions',     label:'转化数',      width:85,  type:'int', group:'front' },
+  { key:'conversion_cost', label:'转化成本',    width:95,  type:'money', group:'front' },
+  { key:'conversion_rate', label:'转化率',      width:85,  type:'rate', group:'front' },
+  { key:'orders',          label:'总订单数',    width:90,  type:'int',   sortable:true, group:'back' },
+  { key:'pay_amount',      label:'总付款金额',  width:115, type:'money', sortable:true, group:'back' },
+  { key:'roi',             label:'退前ROI',     width:90,  type:'roi',   sortable:true, group:'back' },
+  { key:'real_orders',     label:'退后订单数',  width:95,  type:'int', group:'back' },
+  { key:'real_pay_amount', label:'退后付款金额', width:115, type:'money', sortable:true, group:'back' },
+  { key:'real_roi',        label:'退后ROI',     width:90,  type:'roi',   sortable:true, group:'back' },
+  { key:'refund_rate',     label:'退款率',      width:85,  type:'rate', group:'back' },
+  { key:'direct_orders',          label:'单品订单数',    width:100, type:'int',   sortable:true, group:'back' },
+  { key:'direct_pay_amount',      label:'单品付款金额',  width:115, type:'money', sortable:true, group:'back' },
+  { key:'direct_roi',             label:'单品退前ROI',   width:105, type:'roi',   sortable:true, group:'back' },
+  { key:'direct_real_orders',     label:'单品退后订单数', width:120, type:'int',   sortable:true, group:'back' },
+  { key:'direct_real_pay_amount', label:'单品退后付款',  width:115, type:'money', sortable:true, group:'back' },
+  { key:'direct_real_roi',        label:'单品退后ROI',   width:105, type:'roi',   sortable:true, group:'back' },
+  { key:'rt_real_pay',     label:'当天退后付款', width:120, type:'money', group:'back' },
+  { key:'rt_real_roi',     label:'当天退后ROI', width:110, type:'roi', group:'back' },
   { key:'category',      label:'类目',      width:90,  type:'text', group:'info' },
   { key:'product',       label:'投放产品',  width:120, type:'text', group:'info' },
   { key:'ecom_platform', label:'电商平台',  width:90,  type:'text', group:'info' },
@@ -200,29 +225,6 @@ const COLS = [
   { key:'ad_channel',    label:'投放渠道',  width:100, type:'text', group:'info' },
   { key:'agency',        label:'代理商',    width:120, type:'text', group:'info' },
   { key:'tags',            label:'标签',        minWidth:160, type:'tags', pin:'right', group:'info' },
-  { key:'cost',            label:'消费(元)',    width:115, type:'money', sortable:true, group:'front' },
-  { key:'impressions',     label:'展示量',      width:100, type:'int',   sortable:true, group:'front' },
-  { key:'clicks',          label:'点击量',      width:90,  type:'int',   sortable:true, group:'front' },
-  { key:'ctr',             label:'点击率(%)',   width:95,  type:'rate', group:'front' },
-  { key:'cpm',             label:'CPM(元)',     width:95,  type:'money', group:'front' },
-  { key:'cpc',             label:'CPC(元)',     width:90,  type:'money', group:'front' },
-  { key:'conversions',     label:'转化数',      width:85,  type:'int', group:'front' },
-  { key:'conversion_cost', label:'转化成本(元)', width:110, type:'money', group:'front' },
-  { key:'orders',          label:'订单数',      width:85,  type:'int',   sortable:true, group:'back' },
-  { key:'pay_amount',      label:'付款金额(元)', width:120, type:'money', sortable:true, group:'back' },
-  { key:'roi',             label:'ROI',         width:75,  type:'roi',   sortable:true, group:'back' },
-  { key:'real_pay_amount', label:'真实付款(元)', width:120, type:'money', sortable:true, group:'back' },
-  { key:'real_orders',     label:'真实订单',    width:85,  type:'int', group:'back' },
-  { key:'real_roi',        label:'真实ROI',     width:85,  type:'roi',   sortable:true, group:'back' },
-  { key:'rt_real_pay',     label:'实时真实付款(元)', width:140, type:'money', group:'back' },
-  { key:'rt_real_roi',     label:'实时真实ROI', width:115, type:'roi', group:'back' },
-  { key:'refund_rate',     label:'退款率(%)',   width:95,  type:'rate', group:'back' },
-  { key:'direct_pay_amount',      label:'直投下单金额(元)', width:130, type:'money', sortable:true, group:'back' },
-  { key:'direct_orders',          label:'直投下单量',      width:100, type:'int',   sortable:true, group:'back' },
-  { key:'direct_roi',             label:'直投下单ROI',     width:105, type:'roi',   sortable:true, group:'back' },
-  { key:'direct_real_pay_amount', label:'直投成交金额(元)', width:130, type:'money', sortable:true, group:'back' },
-  { key:'direct_real_orders',     label:'直投成交量',      width:100, type:'int',   sortable:true, group:'back' },
-  { key:'direct_real_roi',        label:'直投成交ROI',     width:105, type:'roi',   sortable:true, group:'back' },
 ]
 const COLMAP = Object.fromEntries(COLS.map(c => [c.key, c]))
 // 计算类/难懂字段的表头说明（悬浮 ? 显示计算口径）
@@ -233,8 +235,8 @@ const TIPS = {
   conversion_cost: '转化成本 = 总消费 / 转化数',
   roi: 'ROI = 付款金额 / 消费',
   real_roi: '真实ROI = 真实付款 / 消费',
-  rt_real_pay: '实时真实付款：当天该账户「当天真实付款」订单的付款金额之和（点击与付款为同一日期、且订单状态为已付款/已完成/订单付款/支付/已结算等付款态），数据来自订单明细',
-  rt_real_roi: '实时真实ROI = 实时真实付款 / 消费',
+  rt_real_pay: '当天点击广告当天付款的金额，剔除退款',
+  rt_real_roi: '当天点击广告，当天付款的退后ROI',
   refund_rate: '退款率：汇总口径 =（付款金额 − 真实付款）/ 付款金额 × 100%',
   pay_amount: '下单支付金额（含后续可能退款的部分）',
   real_pay_amount: '扣除退款后的真实成交金额',
@@ -246,7 +248,7 @@ const TIPS = {
   direct_real_roi: '直投成交ROI = 直投成交金额 / 消费',
 }
 const colLabel = k => COLMAP[k]?.label || k
-const STORAGE = 'accountBoardCols.v2'   // v2：默认全部列可见 + 自定义列改版(分类/常用列)
+const STORAGE = 'accountBoardCols.v3'   // v3：按飞书sheet更新字段名/顺序 + 新增转化率
 
 // pinned: 用户勾选的左固定；默认沿用 COLS 里 pin:'left' 的列
 function defaultState() { return COLS.map(c => ({ key: c.key, visible: !c.hidden, pinned: c.pin === 'left' })) }

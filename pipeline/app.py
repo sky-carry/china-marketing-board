@@ -2,7 +2,7 @@
 """投放数据平台 后端 (FastAPI)。
 运行: uvicorn app:app --host 0.0.0.0 --port 8000
 提供: 账号管理 / 数据查询(看板) / 任务&运行 / 登录刷新 API，并托管前端静态文件。"""
-import os, datetime, hashlib, hmac, base64, json, time, secrets, urllib.request, urllib.parse, psycopg2, psycopg2.extras
+import os, datetime, hashlib, hmac, base64, json, time, secrets, threading, urllib.request, urllib.parse, psycopg2, psycopg2.extras
 from fastapi import FastAPI, HTTPException, Body, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -487,6 +487,7 @@ _DETAIL_METRICS = {  # 列key -> SQL 聚合表达式
  "ctr":"SUM(clicks)*100.0/NULLIF(SUM(impressions),0)",
  "cpm":"SUM(cost)*1000.0/NULLIF(SUM(impressions),0)","cpc":"SUM(cost)/NULLIF(SUM(clicks),0)",
  "conversions":"SUM(conversions)","conversion_cost":"SUM(cost)/NULLIF(SUM(conversions),0)",
+ "conversion_rate":"SUM(conversions)*100.0/NULLIF(SUM(clicks),0)",   # 转化率 = 转化数/点击量
  "orders":"SUM(orders)","pay_amount":"SUM(pay_amount)","roi":"SUM(pay_amount)/NULLIF(SUM(cost),0)",
  "real_pay_amount":"SUM(real_pay_amount)","real_orders":"SUM(real_orders)",
  "real_roi":"SUM(real_pay_amount)/NULLIF(SUM(cost),0)",
@@ -723,6 +724,129 @@ def account_login(aid:int):
     if r.returncode!=0:
         raise HTTPException(400, (r.stdout or "")[-300:] + (r.stderr or "")[-300:])
     return {"ok":True,"detail":(r.stdout or "")[-200:]}
+
+# ============================ 单账户历史回填 ============================
+# 新增/历史账号手动补历史数据(定时任务只抓最近15天)。后台线程逐天抓，断点续跑跳过已抓的天(UPSERT幂等)。
+_BACKFILL_JOBS={}            # aid -> {state,total,done,rows,orders,errs,msg,started,finished}
+_BACKFILL_LOCK=threading.Lock()
+_MAX_BACKFILL=3             # 同时回填的账号上限，防一次点太多打爆接口
+
+def _find_login(aid):
+    import fetchers as F
+    return next((l for l in F.load_logins(enabled_only=False) if l.get("id")==aid), None)
+
+def _do_backfill(aid, start_s, end_s, do_orders):
+    import crawl, fetchers as F, db as DB, order_fetchers as OF
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    job=_BACKFILL_JOBS[aid]
+    try:
+        lg=_find_login(aid)
+        if not lg or not lg.get("auth"):
+            job.update(state="error", msg="账号未登录，请先自动/手动登录", finished=True); return
+        p=lg["platform"]; tag=lg["tag"]
+        s=datetime.date.fromisoformat(start_s); e=datetime.date.fromisoformat(end_s)
+        all_days=[s+datetime.timedelta(days=i) for i in range((e-s).days+1)]
+        conn0=DB.connect(); done=DB.done_set(conn0,p,tag); conn0.close()
+        levels=F.LEVELS.get(p,[])
+        order_ok=do_orders and p in OF.ORDER_FETCH
+        level_days={lv:[d for d in all_days if (p,tag,lv,d.isoformat()) not in done] for lv in levels}
+        order_days=[d for d in all_days if (p,tag,"订单",d.isoformat()) not in done] if order_ok else []
+        job["total"]=sum(len(v) for v in level_days.values())+len(order_days)
+        if not job["total"]:
+            job.update(state="done", msg="该区间已全部抓过，无需回填", finished=True); return
+        # ---- 广告：各层级并发，层级内逐天(实时进度)。auth 失败标记，稍后统一重登补齐 ----
+        def run_level(lv):
+            conn=DB.connect(); auth_fail=False
+            try:
+                for d in level_days[lv]:
+                    try:
+                        rows=crawl._fetch_retry(lg,lv,d); DB.upsert(conn,rows); DB.mark_progress(conn,p,tag,lv,d,len(rows))
+                        with _BACKFILL_LOCK: job["rows"]+=len(rows); job["done"]+=1
+                    except Exception as ex:
+                        with _BACKFILL_LOCK: job["errs"]+=1
+                        if crawl._auth_err(ex): auth_fail=True; break
+                        with _BACKFILL_LOCK: job["done"]+=1
+            finally:
+                conn.close()
+            return auth_fail
+        auth_fail=False
+        active=[lv for lv in levels if level_days[lv]]
+        if active:
+            with ThreadPoolExecutor(max_workers=min(4,len(active))) as ex:
+                for f in as_completed([ex.submit(run_level,lv) for lv in active]):
+                    if f.result(): auth_fail=True
+        # auth 失败 -> 重登一次，把该登录仍缺的天补齐(重算 done)
+        if auth_fail:
+            crawl.refresh_login(aid); lg=_find_login(aid) or lg
+            conn=DB.connect()
+            try:
+                done2=DB.done_set(conn,p,tag)
+                for lv in active:
+                    for d in level_days[lv]:
+                        if (p,tag,lv,d.isoformat()) in done2: continue
+                        try:
+                            rows=crawl._fetch_retry(lg,lv,d); DB.upsert(conn,rows); DB.mark_progress(conn,p,tag,lv,d,len(rows))
+                            with _BACKFILL_LOCK: job["rows"]+=len(rows)
+                        except Exception:
+                            with _BACKFILL_LOCK: job["errs"]+=1
+            finally:
+                conn.close()
+        # ---- 订单：逐天 ----
+        if order_days:
+            conn=DB.connect(); OF.ensure_orders_table(conn)
+            try:
+                for d in order_days:
+                    try:
+                        rows=OF.fetch_orders(lg,d); OF.upsert_orders(conn,rows); DB.mark_progress(conn,p,tag,"订单",d,len(rows))
+                        with _BACKFILL_LOCK: job["orders"]+=len(rows)
+                    except Exception as ex:
+                        with _BACKFILL_LOCK: job["errs"]+=1
+                        if crawl._auth_err(ex): crawl.refresh_login(aid); lg=_find_login(aid) or lg
+                    with _BACKFILL_LOCK: job["done"]+=1
+            finally:
+                conn.close()
+        job.update(state="done", msg=f"完成：广告 {job['rows']} 行，订单 {job['orders']} 单"+(f"，{job['errs']} 天失败" if job['errs'] else ""))
+        try:
+            c=db(); c.autocommit=True; cur=c.cursor()
+            st="ok" if not job["errs"] else "error"
+            cur.execute("""INSERT INTO runs (task_id,kind,started_at,finished_at,status,rows_written,detail)
+                VALUES (NULL,'backfill',%s,now(),%s,%s,%s)""",
+                (job.get("started"), st, job["rows"], f"[回填]{tag} {start_s}~{end_s}：广告{job['rows']}行 订单{job['orders']}单"+(f" {job['errs']}天失败" if job['errs'] else "")))
+            c.close()
+        except Exception: pass
+    except Exception as e:
+        job.update(state="error", msg=repr(e)[:200])
+    finally:
+        job["finished"]=True
+
+@app.post("/api/accounts/{aid}/backfill")
+def account_backfill(aid:int, body:dict=Body(...)):
+    start=(body.get("start") or "2025-01-01").strip()
+    end=(body.get("end") or datetime.datetime.now(_SH).date().isoformat()).strip()
+    do_orders=bool(body.get("orders", True))
+    try: datetime.date.fromisoformat(start); datetime.date.fromisoformat(end)
+    except Exception: raise HTTPException(400,"日期格式错误")
+    if start>end: raise HTTPException(400,"起始日期不能晚于结束日期")
+    lg=_find_login(aid)
+    if not lg: raise HTTPException(404,"账号不存在")
+    if not lg.get("auth"): raise HTTPException(400,"账号未登录，请先「自动登录」或「手动登录」再回填")
+    with _BACKFILL_LOCK:
+        cur=_BACKFILL_JOBS.get(aid)
+        if cur and cur.get("state")=="running": raise HTTPException(409,"该账号正在回填中")
+        if sum(1 for j in _BACKFILL_JOBS.values() if j.get("state")=="running")>=_MAX_BACKFILL:
+            raise HTTPException(429,f"同时回填的账号已达上限（{_MAX_BACKFILL}），请等其它账号跑完再试")
+        _BACKFILL_JOBS[aid]={"state":"running","total":0,"done":0,"rows":0,"orders":0,"errs":0,
+                             "msg":"启动中…","started":datetime.datetime.now(),"finished":False}
+    threading.Thread(target=_do_backfill,args=(aid,start,end,do_orders),daemon=True).start()
+    return {"ok":True,"msg":"已开始回填"}
+
+@app.get("/api/accounts/{aid}/backfill_status")
+def account_backfill_status(aid:int):
+    j=_BACKFILL_JOBS.get(aid)
+    if not j: return {"state":"idle"}
+    pct=min(100,round(j["done"]*100/j["total"])) if j.get("total") else 0
+    return {"state":j["state"],"total":j["total"],"done":j["done"],"pct":pct,
+            "rows":j["rows"],"orders":j["orders"],"errs":j["errs"],"msg":j.get("msg","")}
 
 @app.post("/api/accounts/{aid}/autologin")
 def account_autologin(aid:int):
