@@ -747,6 +747,9 @@ def keep_tokens(only_expired:bool=False):
 
 # ============================ 账户看板(全平台所有账户 + 标签) ============================
 ACCOUNT_LEVELS=['推广账号','账户维度','账户']
+# 「现存账户」子查询：投放账户管理里能看到的账户(ad_daily 里有消耗数据的)。
+# 属性下拉候选只取这些账户上填的值——已改名/合并/删除的账户残留在 account_meta 的旧类目/产品不再出现。
+_LIVE_ACCT_SUB="SELECT DISTINCT entity_id FROM ad_daily WHERE level = ANY(%s) AND cost IS NOT NULL"
 
 @app.get("/api/account_board")
 def account_board(request:Request, start:str=None, end:str=None, platform:str=None, search:str=None,
@@ -852,11 +855,12 @@ def account_board_meta(request:Request, platform:str=None):
     accounts=[r["v"] for r in cur.fetchall()]
     mopts={}
     for f in META_FIELDS:
-        if scond:   # 受限用户：属性取值也只出范围内账户的
+        if scond:   # 受限用户：属性取值只出范围内(已是现存账户子集)的
             cur.execute(f"""SELECT DISTINCT {f} v FROM account_meta WHERE {f} IS NOT NULL AND {f}<>''
                 AND entity_id IN (SELECT entity_id FROM ad_daily WHERE {w}) ORDER BY v""", args)
-        else:
-            cur.execute(f"SELECT DISTINCT {f} v FROM account_meta WHERE {f} IS NOT NULL AND {f}<>'' ORDER BY v")
+        else:       # 只取现存账户上填的值(排除已改名/合并/删除账户的残留)
+            cur.execute(f"""SELECT DISTINCT {f} v FROM account_meta WHERE {f} IS NOT NULL AND {f}<>''
+                AND entity_id IN ({_LIVE_ACCT_SUB}) ORDER BY v""",(ACCOUNT_LEVELS,))
         mopts[f]=[r["v"] for r in cur.fetchall()]
     c.close()
     return {"accounts":accounts,"meta_options":mopts,
@@ -1003,10 +1007,11 @@ def adv_accounts(search:str=None):
         r["cost"]=round(float(r["cost"]),2) if r["cost"] else 0
     # 未填/不完整的排最前面(complete=False 在前)，其次按消耗降序
     rows.sort(key=lambda r:(r["complete"], -r["cost"]))
-    # 每个字段已有的去重取值，前端做下拉候选
+    # 每个字段已有的去重取值(仅现存账户上填的，排除已改名/合并/删除账户残留)，前端做下拉候选
     options={}
     for f in META_FIELDS:
-        cur.execute(f"SELECT DISTINCT {f} v FROM account_meta WHERE {f} IS NOT NULL AND {f}<>'' ORDER BY v")
+        cur.execute(f"""SELECT DISTINCT {f} v FROM account_meta WHERE {f} IS NOT NULL AND {f}<>''
+            AND entity_id IN ({_LIVE_ACCT_SUB}) ORDER BY v""",(ACCOUNT_LEVELS,))
         options[f]=[r["v"] for r in cur.fetchall()]
     c.close()
     return {"rows":rows,"options":options,"fields":[{"key":k,"label":META_LABELS[k]} for k in META_FIELDS]}
@@ -1145,8 +1150,9 @@ def order_meta(request:Request):
         if scond:
             cur.execute(f"""SELECT DISTINCT {f} v FROM account_meta WHERE {f} IS NOT NULL AND {f}<>''
                 AND entity_id IN (SELECT ad_account_id FROM orders{ow}) ORDER BY v""", sx)
-        else:
-            cur.execute(f"SELECT DISTINCT {f} v FROM account_meta WHERE {f} IS NOT NULL AND {f}<>'' ORDER BY v")
+        else:       # 只取有订单的现存账户上填的值
+            cur.execute(f"""SELECT DISTINCT {f} v FROM account_meta WHERE {f} IS NOT NULL AND {f}<>''
+                AND entity_id IN (SELECT DISTINCT ad_account_id FROM orders) ORDER BY v""")
         mopts[f]=[r["v"] for r in cur.fetchall()]
     c.close()
     return {"platforms":plats,"types":types,"logins":logins,"accounts":accounts,

@@ -22,9 +22,10 @@
             <template #default="{ row }">
               <span v-if="row.is_admin" style="color:#909399">全部数据</span>
               <template v-else>
-                <el-tag v-for="a in row.scope_agencies" :key="a" size="small" effect="plain" style="margin:1px">{{ a }}</el-tag>
+                <el-tag v-for="a in row.scope_agencies" :key="'a'+a" size="small" effect="plain" style="margin:1px">{{ a }}</el-tag>
+                <el-tag v-for="s in row.scope_stores" :key="'s'+s" size="small" type="warning" effect="plain" style="margin:1px">店:{{ s }}</el-tag>
                 <el-tag v-if="row.scope_accounts.length" size="small" type="success" effect="plain" style="margin:1px">+{{ row.scope_accounts.length }} 个账户</el-tag>
-                <span v-if="!row.scope_agencies.length && !row.scope_accounts.length" style="color:#e6a23c">未分配（看不到数据）</span>
+                <span v-if="!row.scope_agencies.length && !row.scope_stores.length && !row.scope_accounts.length" style="color:#e6a23c">未分配（看不到数据）</span>
               </template>
             </template>
           </el-table-column>
@@ -103,11 +104,17 @@
               placeholder="按代理商授权（可多选）" style="width:100%;margin-bottom:8px">
               <el-option v-for="a in scopeOpt.agencies" :key="a" :label="a" :value="a" />
             </el-select>
+            <el-select v-model="form.scope_stores" multiple filterable clearable collapse-tags collapse-tags-tooltip
+              placeholder="按店铺授权（可多选）" style="width:100%;margin-bottom:8px">
+              <el-option v-for="s in scopeOpt.stores" :key="s" :label="s" :value="s" />
+            </el-select>
             <el-select v-model="form.scope_accounts" multiple filterable clearable collapse-tags collapse-tags-tooltip
               placeholder="或按具体账户授权（可多选）" style="width:100%">
               <el-option v-for="a in scopeOpt.accounts" :key="a.id" :label="a.name" :value="a.id" />
             </el-select>
-            <div style="color:#909399;font-size:12px;margin-top:4px">最终可见 = 选中账户 ∪ 选中代理商下的所有账户。都不选 = 看不到任何数据。</div>
+            <div style="color:#909399;font-size:12px;margin-top:4px">
+              代理商与店铺：<b>都选取交集</b>（既属该代理商又属该店铺的账户），<b>只选其一则按该维度</b>。再 ∪ 上单独选中的账户。都不选 = 看不到任何数据。
+            </div>
           </div>
         </el-form-item>
         <el-form-item label="有效期">
@@ -136,7 +143,7 @@ function isExpired(d) { return d && d < new Date().toISOString().slice(0, 10) }
 
 // ---------- 账号密码 ----------
 const pwRows = ref([]); const pwLoading = ref(false)
-const scopeOpt = reactive({ agencies: [], accounts: [] })
+const scopeOpt = reactive({ agencies: [], stores: [], accounts: [] })
 async function loadPw() {
   pwLoading.value = true
   try { const { data } = await api.get('/auth_accounts'); pwRows.value = data.accounts || [] }
@@ -144,19 +151,19 @@ async function loadPw() {
   finally { pwLoading.value = false }
 }
 async function loadScopeOptions() {
-  try { const { data } = await api.get('/scope_options'); scopeOpt.agencies = data.agencies || []; scopeOpt.accounts = data.accounts || [] } catch {}
+  try { const { data } = await api.get('/scope_options'); scopeOpt.agencies = data.agencies || []; scopeOpt.stores = data.stores || []; scopeOpt.accounts = data.accounts || [] } catch {}
 }
 
 const dlg = ref(false); const saving = ref(false)
-const form = reactive({ _new: true, username: '', password: '', name: '', scope_agencies: [], scope_accounts: [], expires_at: null, note: '' })
+const form = reactive({ _new: true, username: '', password: '', name: '', scope_agencies: [], scope_stores: [], scope_accounts: [], expires_at: null, note: '' })
 function openCreate() {
-  Object.assign(form, { _new: true, username: '', password: '', name: '', scope_agencies: [], scope_accounts: [], expires_at: null, note: '' })
+  Object.assign(form, { _new: true, username: '', password: '', name: '', scope_agencies: [], scope_stores: [], scope_accounts: [], expires_at: null, note: '' })
   dlg.value = true
 }
 function openEdit(row) {
   Object.assign(form, {
     _new: false, username: row.username, password: '', name: row.name || '',
-    scope_agencies: [...(row.scope_agencies || [])], scope_accounts: [...(row.scope_accounts || [])],
+    scope_agencies: [...(row.scope_agencies || [])], scope_stores: [...(row.scope_stores || [])], scope_accounts: [...(row.scope_accounts || [])],
     expires_at: row.expires_at || null, note: row.note || '',
   })
   dlg.value = true
@@ -169,7 +176,7 @@ async function save() {
   try {
     const body = {
       name: form.name, note: form.note, expires_at: form.expires_at || null,
-      scope_agencies: form.scope_agencies, scope_accounts: form.scope_accounts,
+      scope_agencies: form.scope_agencies, scope_stores: form.scope_stores, scope_accounts: form.scope_accounts,
     }
     if (form.password) body.password = form.password
     if (form._new) { body.username = form.username.trim(); await api.post('/auth_accounts', body) }
