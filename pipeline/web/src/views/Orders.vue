@@ -201,8 +201,8 @@ const COLS = [
   { key:'category',        label:'类目',        width:100, bg:true, group:'info' },
   { key:'product',         label:'投放产品',    width:110, bg:true, group:'info' },
   { key:'ecom_platform',   label:'电商平台',    width:100, bg:true, group:'info' },
-  { key:'ad_channel',      label:'投放渠道',    width:100, bg:true, group:'info' },
   { key:'store',           label:'店铺',        width:120, bg:true, group:'info' },
+  { key:'ad_channel',      label:'投放渠道',    width:100, bg:true, group:'info' },
   { key:'agency',          label:'代理商',      width:100, bg:true, group:'info' },
 ]
 const COLMAP = Object.fromEntries(COLS.map(c => [c.key, c]))

@@ -64,7 +64,7 @@
       </div>
     </div>
     </el-tab-pane>
-    <el-tab-pane label="系统子账户管理" name="adv" lazy>
+    <el-tab-pane label="投放账户管理" name="adv" lazy>
       <AdvAccounts v-if="tab==='adv'" />
     </el-tab-pane>
     </el-tabs>

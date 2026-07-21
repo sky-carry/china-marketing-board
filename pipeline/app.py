@@ -82,20 +82,26 @@ def _req_token(request:Request):
 
 def _scope_ids(request:Request):
     """当前用户可见的账户 entity_id 列表；返回 None=不限制(管理员/飞书用户)。
-    仅「密码普通账号」(auth_users 里 is_admin=false)受限：范围 = 选中账户 ∪ 选中代理商下的账户。
+    仅「密码普通账号」(auth_users 里 is_admin=false)受限。范围规则：
+      属性过滤 = 代理商、店铺 各自过滤，两者都选=交集(AND)，只选其一=仅按该维度；
+      最终 = 显式选中账户 ∪ 属性过滤命中的账户。
     已授权但范围为空 -> 返回 []（看不到任何数据）。"""
     d=_req_token(request)
     if not d or d.get("r")=="admin": return None
     u=d.get("u")
     if not u: return None
     c=db(); cur=c.cursor()
-    cur.execute("SELECT is_admin, scope_agencies, scope_accounts FROM auth_users WHERE username=%s",(u,))
+    cur.execute("SELECT is_admin, scope_agencies, scope_stores, scope_accounts FROM auth_users WHERE username=%s",(u,))
     row=cur.fetchone()
     if not row or row["is_admin"]:      # 不在密码表(飞书用户) 或 管理员 -> 不限制
         c.close(); return None
-    agencies=list(row["scope_agencies"] or []); ids=set(str(x) for x in (row["scope_accounts"] or []))
-    if agencies:
-        cur.execute("SELECT entity_id FROM account_meta WHERE agency = ANY(%s)",(agencies,))
+    agencies=list(row["scope_agencies"] or []); stores=list(row["scope_stores"] or [])
+    ids=set(str(x) for x in (row["scope_accounts"] or []))
+    if agencies or stores:              # 代理商∩店铺(都选=交集，仅一者=按该维度)
+        mc=[]; ma=[]
+        if agencies: mc.append("agency = ANY(%s)"); ma.append(agencies)
+        if stores:   mc.append("store = ANY(%s)"); ma.append(stores)
+        cur.execute("SELECT entity_id FROM account_meta WHERE "+" AND ".join(mc), ma)
         ids |= {r["entity_id"] for r in cur.fetchall()}
     c.close(); return list(ids)
 
@@ -340,13 +346,14 @@ def set_user_active(body:dict=Body(...)):
 @app.get("/api/auth_accounts")
 def list_auth_accounts():
     c=db(); cur=c.cursor()
-    cur.execute("""SELECT username,name,is_admin,is_active,note,expires_at,scope_agencies,scope_accounts,
+    cur.execute("""SELECT username,name,is_admin,is_active,note,expires_at,scope_agencies,scope_stores,scope_accounts,
         last_login_at,login_count,created_at FROM auth_users ORDER BY is_admin DESC, created_at NULLS FIRST, username""")
     rows=[dict(r) for r in cur.fetchall()]
     for r in rows:
         r["expires_at"]=str(r["expires_at"]) if r["expires_at"] else None
         r["last_login_at"]=fmt_dt(r["last_login_at"]); r["created_at"]=fmt_dt(r["created_at"])
-        r["scope_agencies"]=list(r["scope_agencies"] or []); r["scope_accounts"]=list(r["scope_accounts"] or [])
+        r["scope_agencies"]=list(r["scope_agencies"] or []); r["scope_stores"]=list(r["scope_stores"] or [])
+        r["scope_accounts"]=list(r["scope_accounts"] or [])
     c.close(); return {"accounts":rows}
 
 @app.post("/api/auth_accounts")
@@ -358,10 +365,11 @@ def create_auth_account(body:dict=Body(...)):
     cur.execute("SELECT 1 FROM auth_users WHERE username=%s",(u,))
     if cur.fetchone(): c.close(); raise HTTPException(400,"用户名已存在")
     salt=secrets.token_hex(16)
-    cur.execute("""INSERT INTO auth_users(username,salt,pw_hash,name,is_admin,is_active,note,expires_at,scope_agencies,scope_accounts)
-        VALUES(%s,%s,%s,%s,false,true,%s,%s,%s,%s)""",
+    cur.execute("""INSERT INTO auth_users(username,salt,pw_hash,name,is_admin,is_active,note,expires_at,scope_agencies,scope_stores,scope_accounts)
+        VALUES(%s,%s,%s,%s,false,true,%s,%s,%s,%s,%s)""",
         (u,salt,_hash_pw(pw,salt),(body.get("name") or u),body.get("note"),(body.get("expires_at") or None),
-         psycopg2.extras.Json(body.get("scope_agencies") or []),psycopg2.extras.Json(body.get("scope_accounts") or [])))
+         psycopg2.extras.Json(body.get("scope_agencies") or []),psycopg2.extras.Json(body.get("scope_stores") or []),
+         psycopg2.extras.Json(body.get("scope_accounts") or [])))
     c.close(); return {"ok":True}
 
 @app.put("/api/auth_accounts/{username}")
@@ -377,6 +385,7 @@ def update_auth_account(username:str, body:dict=Body(...)):
         sets.append("is_active=%s"); args.append(bool(body["is_active"]))
     if "expires_at" in body: sets.append("expires_at=%s"); args.append(body["expires_at"] or None)
     if "scope_agencies" in body: sets.append("scope_agencies=%s"); args.append(psycopg2.extras.Json(body["scope_agencies"] or []))
+    if "scope_stores" in body: sets.append("scope_stores=%s"); args.append(psycopg2.extras.Json(body["scope_stores"] or []))
     if "scope_accounts" in body: sets.append("scope_accounts=%s"); args.append(psycopg2.extras.Json(body["scope_accounts"] or []))
     if body.get("password"):
         if len(body["password"])<6: c.close(); raise HTTPException(400,"密码至少 6 位")
@@ -395,14 +404,16 @@ def delete_auth_account(username:str):
 
 @app.get("/api/scope_options")
 def scope_options():
-    """数据范围分配下拉：代理商列表 + 账户(entity_id+名称)列表。"""
+    """数据范围分配下拉：代理商 + 店铺 + 账户(entity_id+名称)列表。"""
     c=db(); cur=c.cursor()
     cur.execute("SELECT DISTINCT agency v FROM account_meta WHERE agency IS NOT NULL AND agency<>'' ORDER BY v")
     agencies=[r["v"] for r in cur.fetchall()]
+    cur.execute("SELECT DISTINCT store v FROM account_meta WHERE store IS NOT NULL AND store<>'' ORDER BY v")
+    stores=[r["v"] for r in cur.fetchall()]
     cur.execute("""SELECT entity_id, max(entity_name) name FROM ad_daily WHERE level=ANY(%s) AND cost IS NOT NULL
         GROUP BY entity_id ORDER BY max(entity_name) NULLS LAST""",(ACCOUNT_LEVELS,))
     accounts=[{"id":r["entity_id"],"name":r["name"] or r["entity_id"]} for r in cur.fetchall()]
-    c.close(); return {"agencies":agencies,"accounts":accounts}
+    c.close(); return {"agencies":agencies,"stores":stores,"accounts":accounts}
 
 # ============================ 指标定义(SQL 聚合，比率按明细重算) ============================
 METRICS={
@@ -756,7 +767,7 @@ def account_board(request:Request, start:str=None, end:str=None, platform:str=No
     # 投放账户 6 属性(类目/投放产品/…)多选筛选，值来自 account_meta，按 entity_id 关联
     mc=[]; ma=[]
     for f,v in (("category",category),("product",product),("ecom_platform",ecom_platform),
-                ("ad_channel",ad_channel),("store",store),("agency",agency)):
+                ("store",store),("ad_channel",ad_channel),("agency",agency)):
         if v: mc.append(f"{f} = ANY(%s)"); ma.append(v)
     if mc:
         cond.append("entity_id IN (SELECT entity_id FROM account_meta WHERE "+" AND ".join(mc)+")")
@@ -965,7 +976,7 @@ def set_account_tags(body:dict=Body(...)):
 
 # ============================ 投放账户管理(账户自定义属性) ============================
 # 6 个业务属性：类目/投放产品/电商平台/投放渠道/店铺/代理商，按 账户ID 存，供账户看板自定义列展示
-META_FIELDS=["category","product","ecom_platform","ad_channel","store","agency"]
+META_FIELDS=["category","product","ecom_platform","store","ad_channel","agency"]
 META_LABELS={"category":"类目","product":"投放产品","ecom_platform":"电商平台",
              "ad_channel":"投放渠道","store":"店铺","agency":"代理商"}
 
@@ -1106,7 +1117,7 @@ def _order_meta_filter(cond, args, category, product, ecom_platform, ad_channel,
     """按投放账户 6 属性(值来自 account_meta，按 ad_account_id 关联)筛选订单。各属性支持多选(值为列表, OR)。"""
     mc=[]; ma=[]
     for f,v in (("category",category),("product",product),("ecom_platform",ecom_platform),
-                ("ad_channel",ad_channel),("store",store),("agency",agency)):
+                ("store",store),("ad_channel",ad_channel),("agency",agency)):
         if v: mc.append(f"{f} = ANY(%s)"); ma.append(v)
     if mc:
         cond.append("ad_account_id IN (SELECT entity_id FROM account_meta WHERE "+" AND ".join(mc)+")")
@@ -1308,7 +1319,7 @@ def _ensure_tables():
     # 投放账户自定义属性(按 账户ID/entity_id 存，跨平台共享；供账户看板自定义列展示)
     cur.execute("""CREATE TABLE IF NOT EXISTS account_meta (
         entity_id text PRIMARY KEY,
-        category text, product text, ecom_platform text, ad_channel text, store text, agency text,
+        category text, product text, ecom_platform text, store text, ad_channel text, agency text,
         updated_at timestamptz DEFAULT now())""")
     cur.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS daily_time text")  # 每日定时(HH:MM)，空则用 interval_minutes
     cur.execute("ALTER TABLE accounts ADD COLUMN IF NOT EXISTS is_historical boolean DEFAULT false")  # 历史账号：不再抓取、列表置底
@@ -1318,7 +1329,7 @@ def _ensure_tables():
     # 账号密码用户扩展：显示名/角色/启停/备注/有效期/数据范围(代理商+账户)/登录统计
     for col,ddl in (("name","text"),("is_admin","boolean DEFAULT false"),("is_active","boolean DEFAULT true"),
                     ("note","text"),("expires_at","date"),
-                    ("scope_agencies","jsonb DEFAULT '[]'::jsonb"),("scope_accounts","jsonb DEFAULT '[]'::jsonb"),
+                    ("scope_agencies","jsonb DEFAULT '[]'::jsonb"),("scope_stores","jsonb DEFAULT '[]'::jsonb"),("scope_accounts","jsonb DEFAULT '[]'::jsonb"),
                     ("last_login_at","timestamptz"),("login_count","int DEFAULT 0"),("created_at","timestamptz DEFAULT now()")):
         cur.execute(f"ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS {col} {ddl}")
     cur.execute("SELECT count(*) n FROM auth_users")
