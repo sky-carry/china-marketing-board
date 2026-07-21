@@ -58,7 +58,7 @@ def _token_data(token):
 
 _PUBLIC_API={"/api/login","/api/health","/api/auth_config","/api/feishu/login_url","/api/feishu/callback","/api/dev_login"}
 # 管理员专属接口(账号管理/用户管理/定时任务页)——仅密码登录(skg)或 is_admin 用户可访问
-_ADMIN_PREFIXES=("/api/accounts","/api/adv_accounts","/api/account_meta","/api/users","/api/tasks","/api/runs","/api/keep_tokens",
+_ADMIN_PREFIXES=("/api/accounts","/api/adv_accounts","/api/account_meta","/api/account_tags","/api/users","/api/tasks","/api/runs","/api/keep_tokens",
                  "/api/auth_accounts","/api/scope_options")
 def _is_admin_path(p):
     return any(p==x or p.startswith(x+"/") for x in _ADMIN_PREFIXES)

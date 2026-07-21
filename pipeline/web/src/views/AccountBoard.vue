@@ -81,11 +81,15 @@
             <!-- 标签列 -->
             <template v-if="col.type==='tags'">
               <template v-if="!row.__total">
-                <el-tag v-for="(t,i) in row.tags" :key="i" size="small" closable style="margin:2px"
+                <!-- 普通用户只读；管理员可增删 -->
+                <el-tag v-for="(t,i) in row.tags" :key="i" size="small" :closable="isAdmin" style="margin:2px"
                   @close="removeTag(row,i)">{{ t }}</el-tag>
-                <el-input v-if="row._editing" v-model="row._newtag" size="small" style="width:100px"
-                  @keyup.enter="confirmTag(row)" @blur="confirmTag(row)" />
-                <el-button v-else size="small" text type="primary" @click="startTag(row)">+ 添加标签</el-button>
+                <template v-if="isAdmin">
+                  <el-input v-if="row._editing" v-model="row._newtag" size="small" style="width:100px"
+                    @keyup.enter="confirmTag(row)" @blur="confirmTag(row)" />
+                  <el-button v-else size="small" text type="primary" @click="startTag(row)">+ 添加标签</el-button>
+                </template>
+                <span v-else-if="!row.tags || !row.tags.length" style="color:#c0c4cc">—</span>
               </template>
             </template>
             <!-- 普通列 -->
