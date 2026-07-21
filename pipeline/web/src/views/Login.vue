@@ -37,7 +37,7 @@ function finishLogin(token, user, admin) {
   localStorage.setItem('authToken', token)
   localStorage.setItem('authUser', user)
   localStorage.setItem('authAdmin', admin ? '1' : '0')
-  router.replace(route.query.redirect || '/realtime')
+  router.replace(route.query.redirect || '/board')
 }
 
 async function submit() {
