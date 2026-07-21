@@ -60,7 +60,7 @@
             <span v-else>{{ row.__idx }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="时间" :width="colWidths['时间'] || 180" fixed="left">
+        <el-table-column label="时间" :width="colWidths['时间'] || 180" fixed="left" show-overflow-tooltip>
           <template #default="{ row }">{{ timeCell(row) }}</template>
         </el-table-column>
         <el-table-column v-for="col in visibleColumns" :key="col.key" :prop="col.key" :label="col.label"
