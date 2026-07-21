@@ -36,8 +36,8 @@
             </template>
           </el-table-column>
           <el-table-column prop="note" label="备注" min-width="100" show-overflow-tooltip />
-          <el-table-column label="最近登录" width="150" align="center">
-            <template #default="{ row }">{{ row.last_login_at || '—' }}<span v-if="row.login_count" style="color:#909399">（{{ row.login_count }}次）</span></template>
+          <el-table-column label="最近登录" width="205" align="center">
+            <template #default="{ row }"><span style="white-space:nowrap">{{ row.last_login_at || '—' }}<span v-if="row.login_count" style="color:#909399">（{{ row.login_count }}次）</span></span></template>
           </el-table-column>
           <el-table-column label="状态" width="80" align="center">
             <template #default="{ row }">
