@@ -45,7 +45,7 @@
             <span v-else style="color:#c0c4cc">暂无数据</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="380" fixed="right">
+        <el-table-column label="操作" width="480" fixed="right">
           <template #default="{ row }">
             <div class="op-btns">
               <template v-if="!row.is_historical">
@@ -53,6 +53,9 @@
                 <el-button size="small" :loading="row._logging" @click="refreshLogin(row)">手动登录</el-button>
               </template>
               <el-button size="small" @click="openEdit(row)">编辑</el-button>
+              <el-button size="small" type="warning" plain :disabled="bfMap[row.id]?.state==='running'" @click="openBackfill(row)">
+                {{ bfMap[row.id]?.state==='running' ? ('回填中 '+bfMap[row.id].pct+'%') : '回填历史' }}
+              </el-button>
               <el-button size="small" :type="row.is_historical?'success':'info'" @click="toggleHistorical(row)">
                 {{ row.is_historical ? '恢复' : '设为历史' }}
               </el-button>
@@ -87,6 +90,30 @@
         沸点/微橙/麦斯：填账号密码后可「自动登录」。小飞机需短信验证码，走「手动登录」。
       </div>
       <template #footer><el-button @click="dlg=false">取消</el-button><el-button type="primary" @click="save">保存</el-button></template>
+    </el-dialog>
+
+    <!-- 回填历史 弹窗 -->
+    <el-dialog v-model="bfDlg" title="回填历史数据" width="440">
+      <div style="color:#909399;font-size:13px;margin-bottom:14px">
+        账号 <b>{{ bf.tag }}</b>（{{ bf.platform }}）。定时任务只抓最近 15 天，这里把更早的历史数据一次补齐。<br>
+        已抓过的天会自动跳过（可反复点、断点续跑），后台运行不用一直等。
+      </div>
+      <el-form label-width="88">
+        <el-form-item label="起始日期">
+          <el-date-picker v-model="bf.start" type="date" value-format="YYYY-MM-DD" :clearable="false" style="width:200px" />
+          <span style="color:#909399;font-size:12px;margin-left:8px">回填到今天</span>
+        </el-form-item>
+        <el-form-item label="含订单">
+          <el-switch v-model="bf.orders" :disabled="!bf.hasOrders" />
+          <span style="color:#909399;font-size:12px;margin-left:8px">
+            {{ bf.hasOrders ? '同时回填该账号的历史订单' : '该平台无订单数据' }}
+          </span>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="bfDlg=false">取消</el-button>
+        <el-button type="primary" :loading="bf.starting" @click="startBackfill">开始回填</el-button>
+      </template>
     </el-dialog>
   </div>
 </template>
@@ -153,7 +180,60 @@ async function keepAll() {
   catch (e) { ElMessage.error('触发失败：' + (e.response?.data?.detail || e.message)) }
   keeping.value = false
 }
-onMounted(load)
+
+// ===================== 回填历史 =====================
+const ORDER_PLATFORMS = ['小飞机', '沸点', '微橙', '麦斯']
+const bfDlg = ref(false)
+const bf = reactive({ id: null, tag: '', platform: '', start: '2025-01-01', orders: true, hasOrders: true, starting: false })
+const bfMap = reactive({})            // aid -> 后端回填进度 {state,pct,done,total,rows,orders,errs,msg}
+const bfTimers = {}                   // aid -> 正在轮询(去重)
+
+function openBackfill(row) {
+  const has = ORDER_PLATFORMS.includes(row.platform)
+  Object.assign(bf, { id: row.id, tag: row.tag, platform: row.platform, start: '2025-01-01', orders: has, hasOrders: has, starting: false })
+  bfDlg.value = true
+}
+async function startBackfill() {
+  bf.starting = true
+  try {
+    await api.post(`/accounts/${bf.id}/backfill`, { start: bf.start, orders: bf.orders })
+    ElMessage.success('已开始回填，后台运行中')
+    bfDlg.value = false
+    bfMap[bf.id] = { state: 'running', pct: 0 }
+    pollBackfill(bf.id)
+  } catch (e) { ElMessage.error('启动失败：' + (e.response?.data?.detail || e.message)) }
+  finally { bf.starting = false }
+}
+async function pollBackfill(aid) {
+  if (bfTimers[aid]) return            // 已在轮询
+  bfTimers[aid] = true
+  try {
+    while (true) {
+      let s
+      try { s = (await api.get(`/accounts/${aid}/backfill_status`)).data } catch { break }
+      bfMap[aid] = s
+      if (s.state !== 'running') {
+        if (s.state === 'done') ElMessage.success((rowTag(aid) || '账号') + ' 回填完成：' + (s.msg || ''))
+        else if (s.state === 'error') ElMessage.error((rowTag(aid) || '账号') + ' 回填失败：' + (s.msg || ''))
+        load()                         // 刷新已入库行数/数据覆盖
+        break
+      }
+      await new Promise(r => setTimeout(r, 2000))
+    }
+  } finally { delete bfTimers[aid] }
+}
+function rowTag(aid) { const r = rows.value.find(x => x.id === aid); return r && r.tag }
+// 页面进入/刷新时，探测是否有正在跑的回填并接续显示
+async function sweepBackfills() {
+  for (const r of rows.value) {
+    try {
+      const s = (await api.get(`/accounts/${r.id}/backfill_status`)).data
+      if (s.state === 'running') { bfMap[r.id] = s; pollBackfill(r.id) }
+    } catch {}
+  }
+}
+
+onMounted(async () => { await load(); sweepBackfills() })
 </script>
 
 <style scoped>
