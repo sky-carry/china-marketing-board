@@ -1,6 +1,6 @@
 # 投放数据平台 —— Docker 部署
 # 启动：docker compose up -d --build
-# 访问：http://<服务器IP>:8060
+# 访问：http://<服务器IP>（80端口）或 http://<服务器IP>:8060
 services:
   db:
     image: postgres:18-alpine
@@ -26,7 +26,8 @@ services:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/ad_data
       TZ: Asia/Shanghai
     ports:
-      - "8060:8060"
+      - "80:8060"      # 域名/IP 直接访问(host 80 -> 容器 8060)
+      - "8060:8060"    # 保留旧端口，现有链接不受影响
     volumes:
       - cmb_profiles:/app/profiles        # 浏览器登录态持久化(跨容器重建保留会话，减少重登)
       - ./appdata/auth_secret.txt:/app/auth_secret.txt   # 登录签名密钥持久化(否则每次重建会登出所有人)
