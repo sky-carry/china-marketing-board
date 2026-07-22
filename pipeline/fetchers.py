@@ -76,31 +76,30 @@ def _first(it,keys):
 # CID报表(cid.smallfighter.com)含所有账户(含停投)，是超集；Keys=["account_id"] 让服务器聚合成「一账户一行」。
 def fetch_xfj_account(login,day):
     a=login["auth"]; M=1e6
-    op_uids=[str(x) for x in (a.get("op_uids") or [a["op_uid"]])]   # 逐项目抓
-    items=[]
-    for op_uid in op_uids:
-        cookie=f'lang=zhCN; td.token={a["token"]}; td-op-uid={op_uid}; td.sid={a["sid"]}'
-        hdr={'authorization':'Bearer '+a["token"],'content-type':'application/json; charset=UTF-8','cookie':cookie,
-             'td-op-uid':op_uid,'td-product':'cid','origin':'https://cid.smallfighter.com',
-             'referer':'https://cid.smallfighter.com/','accept-encoding':'identity','user-agent':UA}
-        got=[]; page=1
-        while True:
-            data={"order":"cost|-1","IsCid":True,"needMulProject":True,"Keys":["account_id"],
-              "userIds":[],"spaceBelongIds":[],"BeginDate":_ts(day),"EndDate":_ts(day,True),"TimeKeys":"",
-              "accountIds":[],"LabelKey":0,"channelIds":[],"ecpIds":[],"Type":155,"_type":"CID_REPORT",
-              "page":page,"limit":200,"metrics":XFJ_MET,"SelectedColumns":XFJ_MET,"Level":3,"AscribeKey":0,
-              "accountStatus":[],"adxSubIds":[],"isAggregateByUser":False,"isAggregateByBizType":False,
-              "isNotFilterDeletedAccount":False,"cidGoodIds":[],"CidBusinessIds":[],"CidOperationIds":[],
-              "NeedSpaceBelong":False,"NeedCidOperator":False}
-            body=json.dumps({"mid":page,"source":"td.web.vue","hash":"#/cid/report",
-                  "url":"/v1/cid/report/list","data":data}).encode()
-            req=urllib.request.Request('https://cid.smallfighter.com/v1/cid/report/list',data=body,headers=hdr,method='POST')
-            d=json.loads(urllib.request.urlopen(req,timeout=60).read())['data']
-            page_items=d.get('items') or []
-            got+=page_items
-            if len(got)>=d.get('total',0) or not page_items: break
-            page+=1; time.sleep(0.1)
-        items+=got
+    # CID报表(needMulProject)是「所有项目所有账户」的超集，取任一 op_uid 查一次即可。
+    # 不可逐 op_uid 循环：否则同一账户会被各项目各返回一次(消费/直推等翻倍风险、且多打一倍接口)。
+    op_uid=str((a.get("op_uids") or [a["op_uid"]])[0])
+    cookie=f'lang=zhCN; td.token={a["token"]}; td-op-uid={op_uid}; td.sid={a["sid"]}'
+    hdr={'authorization':'Bearer '+a["token"],'content-type':'application/json; charset=UTF-8','cookie':cookie,
+         'td-op-uid':op_uid,'td-product':'cid','origin':'https://cid.smallfighter.com',
+         'referer':'https://cid.smallfighter.com/','accept-encoding':'identity','user-agent':UA}
+    items=[]; page=1
+    while True:
+        data={"order":"cost|-1","IsCid":True,"needMulProject":True,"Keys":["account_id"],
+          "userIds":[],"spaceBelongIds":[],"BeginDate":_ts(day),"EndDate":_ts(day,True),"TimeKeys":"",
+          "accountIds":[],"LabelKey":0,"channelIds":[],"ecpIds":[],"Type":155,"_type":"CID_REPORT",
+          "page":page,"limit":200,"metrics":XFJ_MET,"SelectedColumns":XFJ_MET,"Level":3,"AscribeKey":0,
+          "accountStatus":[],"adxSubIds":[],"isAggregateByUser":False,"isAggregateByBizType":False,
+          "isNotFilterDeletedAccount":False,"cidGoodIds":[],"CidBusinessIds":[],"CidOperationIds":[],
+          "NeedSpaceBelong":False,"NeedCidOperator":False}
+        body=json.dumps({"mid":page,"source":"td.web.vue","hash":"#/cid/report",
+              "url":"/v1/cid/report/list","data":data}).encode()
+        req=urllib.request.Request('https://cid.smallfighter.com/v1/cid/report/list',data=body,headers=hdr,method='POST')
+        d=json.loads(urllib.request.urlopen(req,timeout=60).read())['data']
+        page_items=d.get('items') or []
+        items+=page_items
+        if len(items)>=d.get('total',0) or not page_items: break
+        page+=1; time.sleep(0.1)
     out=[]
     for it in items:
         cost=_num(it.get('cost'))
