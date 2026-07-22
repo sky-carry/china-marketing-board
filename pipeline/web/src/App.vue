@@ -102,6 +102,14 @@ async function savePwd() {
   } catch (e) { ElMessage.error(e.response?.data?.detail || '修改失败') }
 }
 
+// 心跳上报：统计用户在网页的停留时长（仅登录后、页面可见时；每 30 秒一次）
+let lastBeat = Date.now()
+function heartbeat() {
+  if (document.visibilityState !== 'visible' || !localStorage.getItem('authToken')) return
+  const now = Date.now(); const sec = Math.min(Math.round((now - lastBeat) / 1000), 90); lastBeat = now
+  if (sec > 0) api.post('/heartbeat', { seconds: sec }).catch(() => {})
+}
+
 onMounted(async () => {
   try { const { data } = await api.get('/meta'); if (data.platforms?.length) platforms.value = data.platforms } catch {}
   try {
@@ -111,6 +119,8 @@ onMounted(async () => {
     isAdmin.value = !!data.admin
     localStorage.setItem('authAdmin', data.admin ? '1' : '0')
   } catch {}
+  setInterval(heartbeat, 30000)
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') lastBeat = Date.now() })
 })
 </script>
 

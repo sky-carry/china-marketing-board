@@ -41,18 +41,26 @@ def _auth_secret():
 _SECRET=_auth_secret()
 def _hash_pw(pw, salt):
     return base64.b64encode(hashlib.pbkdf2_hmac("sha256", pw.encode(), bytes.fromhex(salt), 100000)).decode()
+def _week_start_ts():
+    """本周一 0:00(上海) 的 epoch 秒。只有本周一0点之后签发的 token 才有效 —— 实现「每周一强制重新登录」。"""
+    now=datetime.datetime.now(_SH)
+    monday0=(now - datetime.timedelta(days=now.weekday())).replace(hour=0,minute=0,second=0,microsecond=0)
+    return int(monday0.timestamp())
 def _make_token(username, role="user", days=7):
-    exp=int(time.time())+days*86400
-    payload=base64.urlsafe_b64encode(json.dumps({"u":username,"r":role,"exp":exp}).encode()).decode().rstrip("=")
+    now=int(time.time()); exp=now+days*86400
+    payload=base64.urlsafe_b64encode(json.dumps({"u":username,"r":role,"exp":exp,"iat":now}).encode()).decode().rstrip("=")
     sig=hmac.new(_SECRET, payload.encode(), hashlib.sha256).hexdigest()
     return f"{payload}.{sig}"
 def _token_data(token):
-    """校验签名+有效期，返回 payload dict({u,r,exp}) 或 None。"""
+    """校验签名+有效期，返回 payload dict({u,r,exp,iat}) 或 None。
+    另：本周一0点前签发的 token 一律失效（每周一强制重登一次）。"""
     try:
         payload,sig=token.split(".")
         if not hmac.compare_digest(sig, hmac.new(_SECRET, payload.encode(), hashlib.sha256).hexdigest()): return None
         data=json.loads(base64.urlsafe_b64decode(payload+"="*(-len(payload)%4)))
-        return data if data.get("exp",0)>=time.time() else None
+        if data.get("exp",0)<time.time(): return None            # 常规 7 天过期
+        if data.get("iat",0)<_week_start_ts(): return None        # 本周一0点前签发 -> 失效，需重登
+        return data
     except Exception:
         return None
 
@@ -131,7 +139,8 @@ def login(body:dict=Body(...)):
         c.close(); raise HTTPException(403,"账号已停用，请联系管理员")
     if row["expires_at"] and row["expires_at"] < datetime.datetime.now(_SH).date():
         c.close(); raise HTTPException(403,"账号已过期，请联系管理员")
-    cur.execute("UPDATE auth_users SET last_login_at=now(), login_count=COALESCE(login_count,0)+1 WHERE username=%s",(u,))
+    cur.execute("""UPDATE auth_users SET first_login_at=COALESCE(first_login_at,now()),
+        last_login_at=now(), login_count=COALESCE(login_count,0)+1 WHERE username=%s""",(u,))
     c.close()
     admin=bool(row["is_admin"])
     return {"ok":True,"token":_make_token(u,role="admin" if admin else "user"),
@@ -152,6 +161,19 @@ def me(request:Request):  # 能进到这里说明中间件已放行(token 有效
             c.close()
         except Exception: pass
     return {"ok":True,"admin":admin,"user":user,"name":name}
+
+@app.post("/api/heartbeat")
+def heartbeat(request:Request, body:dict=Body(...)):
+    """前端心跳：把本次活跃秒数累加到 (用户, 今日) 停留时长。单次最多计 120 秒(防刷)。"""
+    d=_req_token(request); key=d.get("u") if d else None
+    if not key: return {"ok":True}
+    sec=min(max(int(body.get("seconds") or 0),0),120)
+    if sec<=0: return {"ok":True}
+    today=datetime.datetime.now(_SH).date().isoformat()
+    c=db(); c.autocommit=True; cur=c.cursor()
+    cur.execute("""INSERT INTO user_activity(user_key,date,seconds) VALUES(%s,%s,%s)
+        ON CONFLICT(user_key,date) DO UPDATE SET seconds=user_activity.seconds+EXCLUDED.seconds, updated_at=now()""",(key,today,sec))
+    c.close(); return {"ok":True}
 
 @app.post("/api/change_password")
 def change_password(body:dict=Body(...)):
@@ -308,7 +330,7 @@ def feishu_callback(code:str=None, state:str=None):
         row=_upsert_user(oid, u) if oid else None   # 落库/更新用户
         if row is not None and not row.get("is_active"):   # 禁用者拦在门外
             print(f"[feishu] 已禁用用户尝试登录: {name}", flush=True)
-            return _login_redirect(err="账号已被禁用，请联系管理员")
+            return _login_redirect(err="系统登录失败，请联系站外投放团队")
         role="admin" if (row and row.get("is_admin")) else "user"   # 飞书用户默认普通，除非 is_admin
         print(f"[feishu] 登录成功(OAuth2) token_code={tk.get('code')} info_code={info.get('code')} name={name} role={role}", flush=True)
     except Exception as e:
@@ -325,10 +347,13 @@ def dev_login():
 
 @app.get("/api/users")
 def list_users():
-    """用户管理：列出所有飞书登录用户(按最近登录倒序)。"""
+    """用户管理：列出所有飞书登录用户(按最近登录倒序)。today_seconds=今日在网页停留秒数。"""
+    today=datetime.datetime.now(_SH).date().isoformat()
     c=db(); cur=c.cursor()
-    cur.execute("""SELECT id,open_id,name,avatar_url,email,mobile,source,is_active,is_admin,
-        first_login_at,last_login_at,login_count FROM users ORDER BY last_login_at DESC NULLS LAST, id DESC""")
+    cur.execute("""SELECT u.id,u.open_id,u.name,u.avatar_url,u.email,u.mobile,u.source,u.is_active,u.is_admin,
+        u.first_login_at,u.last_login_at,u.login_count, COALESCE(a.seconds,0) today_seconds
+        FROM users u LEFT JOIN user_activity a ON a.user_key=u.open_id AND a.date=%s
+        ORDER BY u.last_login_at DESC NULLS LAST, u.id DESC""",(today,))
     rows=cur.fetchall(); c.close()
     return {"users":rows}
 
@@ -345,12 +370,17 @@ def set_user_active(body:dict=Body(...)):
 # 外部账号一律普通用户(is_admin=false)，按 代理商/账户 分配数据范围。内置 skg 为管理员，不可删/停。
 @app.get("/api/auth_accounts")
 def list_auth_accounts():
+    today=datetime.datetime.now(_SH).date().isoformat()
     c=db(); cur=c.cursor()
-    cur.execute("""SELECT username,name,is_admin,is_active,note,expires_at,scope_agencies,scope_stores,scope_accounts,
-        last_login_at,login_count,created_at FROM auth_users ORDER BY is_admin DESC, created_at NULLS FIRST, username""")
+    cur.execute("""SELECT au.username,au.name,au.is_admin,au.is_active,au.note,au.expires_at,
+        au.scope_agencies,au.scope_stores,au.scope_accounts,au.first_login_at,au.last_login_at,au.login_count,au.created_at,
+        COALESCE(a.seconds,0) today_seconds
+        FROM auth_users au LEFT JOIN user_activity a ON a.user_key=au.username AND a.date=%s
+        ORDER BY au.is_admin DESC, au.created_at NULLS FIRST, au.username""",(today,))
     rows=[dict(r) for r in cur.fetchall()]
     for r in rows:
         r["expires_at"]=str(r["expires_at"]) if r["expires_at"] else None
+        r["first_login_at"]=fmt_dt(r["first_login_at"])
         r["last_login_at"]=fmt_dt(r["last_login_at"]); r["created_at"]=fmt_dt(r["created_at"])
         r["scope_agencies"]=list(r["scope_agencies"] or []); r["scope_stores"]=list(r["scope_stores"] or [])
         r["scope_accounts"]=list(r["scope_accounts"] or [])
@@ -1045,8 +1075,8 @@ def realtime_board(request:Request, date:str=None):
             "direct_real_orders":int(a["dro"]),
             "direct_real_pay":round(a["drp"],2),
             "direct_real_roi":round(a["drp"]/cost,2) if cost else None,
-            "last_hour_cost":None,                       # 无小时级数据
             "y_cost":round(a["y_cost"],2),
+            "y_real_pay":round(a["y_real_pay"],2),
             "y_real_roi":round(yroi,2) if yroi is not None else None,
         }
     # 按 6 维组合聚合（相同属性的账户合并成一行）
@@ -1069,11 +1099,13 @@ def realtime_board(request:Request, date:str=None):
                 d.update(row_type="detail", category=cat or "未分类", product=k[1],
                          ecom_platform=k[2], store=k[3], ad_channel=k[4], agency=k[5])
                 rows.append(d)
-            sub=raw0()
-            for _,v in grp: merge(sub,v)
-            ds=derive(sub); ds.update(row_type="subtotal", category=cat or "未分类",
-                product=(prod or "未命名")+"-小计", ecom_platform="", store="", ad_channel="", agency="")
-            rows.append(ds)
+            # 该品只有一行明细时不再显示小计（避免和明细行重复）
+            if len(grp) > 1:
+                sub=raw0()
+                for _,v in grp: merge(sub,v)
+                ds=derive(sub); ds.update(row_type="subtotal", category=cat or "未分类",
+                    product=(prod or "未命名")+"-小计", ecom_platform="", store="", ad_channel="", agency="")
+                rows.append(ds)
     # —— 总计 ——
     tot=raw0()
     for v in combos.values(): merge(tot,v)
@@ -1460,7 +1492,7 @@ def _ensure_tables():
     for col,ddl in (("name","text"),("is_admin","boolean DEFAULT false"),("is_active","boolean DEFAULT true"),
                     ("note","text"),("expires_at","date"),
                     ("scope_agencies","jsonb DEFAULT '[]'::jsonb"),("scope_stores","jsonb DEFAULT '[]'::jsonb"),("scope_accounts","jsonb DEFAULT '[]'::jsonb"),
-                    ("last_login_at","timestamptz"),("login_count","int DEFAULT 0"),("created_at","timestamptz DEFAULT now()")):
+                    ("first_login_at","timestamptz"),("last_login_at","timestamptz"),("login_count","int DEFAULT 0"),("created_at","timestamptz DEFAULT now()")):
         cur.execute(f"ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS {col} {ddl}")
     cur.execute("SELECT count(*) n FROM auth_users")
     if cur.fetchone()["n"]==0:
@@ -1477,6 +1509,10 @@ def _ensure_tables():
         source text DEFAULT 'feishu', is_active boolean DEFAULT true, is_admin boolean DEFAULT false,
         first_login_at timestamptz DEFAULT now(), last_login_at timestamptz, login_count int DEFAULT 0,
         created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now())""")
+    # 用户在网页的停留时长：按 (用户标识, 日期) 累加活跃秒数(前端心跳上报)。飞书=open_id，密码账号=username。
+    cur.execute("""CREATE TABLE IF NOT EXISTS user_activity (
+        user_key text, date date, seconds int DEFAULT 0, updated_at timestamptz DEFAULT now(),
+        PRIMARY KEY(user_key, date))""")
     # 自定义列「常用列」预设：管理员(主账号)存的 is_shared=true 全员可见；普通用户(子账号)存的仅自己可见
     cur.execute("""CREATE TABLE IF NOT EXISTS column_presets (
         id serial PRIMARY KEY,

@@ -35,9 +35,16 @@
               <span v-else :style="{ color: isExpired(row.expires_at) ? '#f56c6c' : '' }">{{ row.expires_at }}</span>
             </template>
           </el-table-column>
-          <el-table-column prop="note" label="备注" min-width="100" show-overflow-tooltip />
-          <el-table-column label="最近登录" width="205" align="center">
-            <template #default="{ row }"><span style="white-space:nowrap">{{ row.last_login_at || '—' }}<span v-if="row.login_count" style="color:#909399">（{{ row.login_count }}次）</span></span></template>
+          <el-table-column prop="note" label="备注" min-width="90" show-overflow-tooltip />
+          <el-table-column prop="login_count" label="登录次数" width="90" align="center" sortable />
+          <el-table-column label="首次登录" width="160" align="center">
+            <template #default="{ row }"><span style="white-space:nowrap">{{ row.first_login_at || '—' }}</span></template>
+          </el-table-column>
+          <el-table-column label="最近登录" width="160" align="center">
+            <template #default="{ row }"><span style="white-space:nowrap">{{ row.last_login_at || '—' }}</span></template>
+          </el-table-column>
+          <el-table-column label="今日停留" width="100" align="center">
+            <template #default="{ row }">{{ dur(row.today_seconds) }}</template>
           </el-table-column>
           <el-table-column label="状态" width="80" align="center">
             <template #default="{ row }">
@@ -75,8 +82,14 @@
             <template #default="{ row }"><el-tag size="small" :type="row.is_admin?'danger':'info'" effect="plain">{{ row.is_admin?'管理员':'普通' }}</el-tag></template>
           </el-table-column>
           <el-table-column prop="login_count" label="登录次数" width="90" align="center" sortable />
+          <el-table-column label="首次登录" width="160" align="center" sortable :sort-by="r => r.first_login_at || ''">
+            <template #default="{ row }">{{ fmt(row.first_login_at) }}</template>
+          </el-table-column>
           <el-table-column label="最近登录" width="160" align="center" sortable :sort-by="r => r.last_login_at || ''">
             <template #default="{ row }">{{ fmt(row.last_login_at) }}</template>
+          </el-table-column>
+          <el-table-column label="今日停留" width="100" align="center" sortable :sort-by="r => r.today_seconds || 0">
+            <template #default="{ row }">{{ dur(row.today_seconds) }}</template>
           </el-table-column>
           <el-table-column label="状态" width="90" align="center" fixed="right">
             <template #default="{ row }">
@@ -140,6 +153,13 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 const tab = ref('pw')
 function fmt(s) { return s ? new Date(s).toLocaleString('zh-CN', { hour12: false }) : '—' }
 function isExpired(d) { return d && d < new Date().toISOString().slice(0, 10) }
+// 今日停留秒数 -> 可读时长
+function dur(sec) {
+  sec = Number(sec) || 0
+  if (sec < 60) return sec ? sec + '秒' : '—'
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60)
+  return h ? `${h}时${m}分` : `${m}分`
+}
 
 // ---------- 账号密码 ----------
 const pwRows = ref([]); const pwLoading = ref(false)

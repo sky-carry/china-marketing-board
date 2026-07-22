@@ -44,6 +44,7 @@
             <td class="num">{{ money(r.direct_real_pay) }}</td>
             <td class="num">{{ roi(r.direct_real_roi) }}</td>
             <td class="num">{{ money(r.y_cost) }}</td>
+            <td class="num">{{ money(r.y_real_pay) }}</td>
             <td class="num">{{ roi(r.y_real_roi) }}</td>
           </tr>
         </tbody>
@@ -58,25 +59,26 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import api from '../api'
 import { Refresh } from '@element-plus/icons-vue'
 
-// 列定义：6 维度 + 12 指标（顺序与飞书「实时数据」sheet 一致）
+// 列定义：6 维度 + 12 指标（表头与飞书「实时数据」sheet 一致）
 const COLS = [
   { key:'category',    label:'类目',   dim:true, w:70 },
-  { key:'product',     label:'产品',   dim:true, w:96 },
-  { key:'ecom_platform', label:'渠道', dim:true, w:60 },
+  { key:'product',     label:'投放产品', dim:true, w:96 },
+  { key:'ecom_platform', label:'电商平台', dim:true, w:74 },
   { key:'store',       label:'店铺',   dim:true, w:64 },
   { key:'ad_channel',  label:'投放渠道', dim:true, w:84 },
   { key:'agency',      label:'代理商', dim:true, w:90 },
   { key:'cost',        label:'消耗',   w:96 },
-  { key:'real_orders', label:'真实订单', w:78 },
-  { key:'real_pay',    label:'真实付款', w:100 },
-  { key:'real_roi',    label:'真实ROI', w:78 },
-  { key:'roi_vs_yesterday', label:'对比昨日ROI', w:96 },
+  { key:'real_orders', label:'退后订单数', w:88 },
+  { key:'real_pay',    label:'退后付款金额', w:106 },
+  { key:'real_roi',    label:'退后ROI', w:80 },
+  { key:'roi_vs_yesterday', label:'对比昨日退后ROI', w:118 },
   { key:'refund_rate', label:'退款率', w:72 },
-  { key:'direct_real_orders', label:'直投成交量', w:86 },
-  { key:'direct_real_pay', label:'直投成交金额', w:104 },
-  { key:'direct_real_roi', label:'直投成交ROI', w:96 },
-  { key:'y_cost',      label:'昨日总消耗', w:100 },
-  { key:'y_real_roi',  label:'昨日真实ROI', w:96 },
+  { key:'direct_real_orders', label:'单品退后订单数', w:106 },
+  { key:'direct_real_pay', label:'单品退后付款', w:104 },
+  { key:'direct_real_roi', label:'单品退后ROI', w:96 },
+  { key:'y_cost',      label:'昨日消耗', w:96 },
+  { key:'y_real_pay',  label:'昨日退后付款金额', w:118 },
+  { key:'y_real_roi',  label:'昨日退后ROI', w:104 },
 ]
 
 const data = ref({ rows: [], date: '', updated_at: '', active_accounts: 0 })
@@ -176,13 +178,14 @@ defineExpose({ load })
 .rt-table td.down { color: #d5493f; }
 .rt-table td.warn { color: #d5493f; }
 .rt-table td.label { font-weight: 700; text-align: center; color: #303133; }
-.rt-table td.sub-label { text-align: center; font-weight: 600; }   /* 产品小计标签居中 */
+.rt-table td.sub-label { text-align: center; font-weight: 700; }   /* 产品小计标签居中+加粗 */
 
-/* 行类型底色（系统中性/蓝色调） */
+/* 行类型底色（系统中性/蓝色调）。加粗规则：小计/总计行加粗；电商平台明细行(京东盛德等)不加粗 */
 .rt-detail:hover td { background: #f5f7fa; }
-.rt-subtotal td { background: #e4e7ed; font-weight: 600; }
+.rt-subtotal td { background: #e4e7ed; font-weight: 700; }
 .rt-total td { background: #ecf5ff; font-weight: 700; font-size: 12.5px; }
-.rt-platform td { background: #fafafa; }
+.rt-platform td { background: #fafafa; font-weight: 400; }
+.rt-platform td.label { font-weight: 400; }   /* 京东户外/京东盛德/京东自营 不加粗 */
 .rt-platform_subtotal td { background: #dbe1ea; font-weight: 700; }
 .rt-empty { padding: 40px; text-align: center; color: #909399; }
 </style>
