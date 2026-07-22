@@ -196,9 +196,10 @@ def fetch_xfj_material(login,day):
         page+=1; time.sleep(0.1)
     out=[]
     for it in items:
-        cost=_num(it.get('cost'))
-        if not cost: continue
-        cost/=M; pay=(_num(it.get('cidm_metric_3')) or 0)/M; rpay=(_num(it.get('cidm_metric_4')) or 0)/M
+        cost=_num(it.get('cost')) or 0
+        pay=_num(it.get('cidm_metric_3')) or 0; rpay=_num(it.get('cidm_metric_4')) or 0
+        if not (cost or pay or rpay or _num(it.get('cidm_metric_1')) or _num(it.get('cidm_metric_2'))): continue  # 付款/订单不为0也保留
+        cost/=M; pay/=M; rpay/=M
         out.append({"entity_id":str(it.get('_id')),"entity_name":it.get('Name'),
             "account_id":"","account_name":None,"parent_id":None,"parent_name":None,"channel":"小飞机素材",
             "cost":round(cost,2),"impressions":_i(it.get('impressions')),"clicks":_i(it.get('adx_metric_0')),
@@ -225,8 +226,9 @@ def _fd_rows(art, items):
     """沸点原始 list -> 统一指标行。网页接口与官方API字段一致，共用此映射：金额÷100转元，比率÷100转百分数。"""
     idk,namek,pidk,pnamek=FD_IDNAME[art]; H=100; out=[]
     for it in items:
-        cost=_num(it.get('cost'))
-        if not cost: continue
+        cost=_num(it.get('cost')) or 0
+        # 消费0但有下单/成交/直投付款/订单的行也保留(付款按付款日回流到无消费的天)
+        if not (cost or _num(it.get('originOrderAmount')) or _num(it.get('orderAmount')) or _num(it.get('directOriginOrderAmount')) or _num(it.get('directOrderAmount')) or _num(it.get('originOrderCount')) or _num(it.get('orderCount'))): continue
         cost/=H; conv=_num(it.get('convertCount'))
         out.append({"entity_id":str(_first(it,idk)),"entity_name":_first(it,namek),
             "account_id":str(_first(it,["advertiserId"]) or ""),"account_name":_first(it,["advertiserName"]),
@@ -354,8 +356,9 @@ def fetch_wc(login,level,day):
         page+=1; time.sleep(0.1)
     idk,namek,pidk,pnamek=WC_IDNAME[level]; out=[]
     for it in items:
-        cost=_num(it.get('scost'))
-        if not cost: continue
+        cost=_num(it.get('scost')) or 0
+        # 消费0但有付款/单品/订单的行也保留(付款回流到无消费的天)
+        if not (cost or _num(it.get('sall_alipay_total_price')) or _num(it.get('salipay_total_price')) or _num(it.get('sall_single_total_price')) or _num(it.get('ssingle_total_price')) or _num(it.get('sall_alipay_count')) or _num(it.get('salipay_count'))): continue
         adv_id=_first(it,["advertiser_id"]); adv_name=_first(it,["advertiser_name"])
         if level=="账户" and adv_id and adv_name:      # 账户级顺带缓存账户名，供深层补名
             _WC_NAME[str(adv_id)]=adv_name
@@ -399,8 +402,9 @@ def fetch_ms(login,level,day):
         page+=1; time.sleep(0.1)
     idk,namek,pidk,pnamek=MS_IDNAME[level]; out=[]
     for it in items:
-        costs=_num(it.get('costs'))
-        if not costs: continue
+        costs=_num(it.get('costs')) or 0
+        # 消费0但有成交/主投品/订单的行也保留(付款回流到无消费的天)
+        if not (costs or _num(it.get('all_gmv')) or _num(it.get('all_gsv')) or _num(it.get('direct_all_gmv')) or _num(it.get('direct_all_gsv')) or _num(it.get('all_no')) or _num(it.get('all_gsv_no'))): continue
         shows=_num(it.get('shows')); clicks=_num(it.get('clicks')); conv=_num(it.get('converts')); allgmv=_num(it.get('all_gmv')); refund=_num(it.get('refund_gmv'))
         ctr=_num(it.get('click_rate')); cpm=_num(it.get('cpm')); cpc=_num(it.get('cpc')); ccost=_num(it.get('convert_cost'))
         out.append({"entity_id":str(_first(it,idk)),"entity_name":_first(it,namek),
@@ -440,8 +444,9 @@ def fetch_fk(login,level,day):
         page+=1; time.sleep(0.1)
     out=[]
     for it in items:
-        cost=_num(it.get("statCost"))
-        if not cost: continue
+        cost=_num(it.get("statCost")) or 0
+        # 消费0但有付款/退后/直投的行也保留(付款回流到无消费的天)
+        if not (cost or _num(it.get("goodsPrice")) or _num(it.get("dischargeBackGoodsPrice")) or _num(it.get("goodsDirectPrice")) or _num(it.get("directDischargeBackGoodsPrice")) or _num(it.get("goodsCount"))): continue
         out.append({"entity_id":str(it.get("advertiserId")),"entity_name":it.get("advertiserName"),
             "account_id":str(it.get("advertiserId") or ""),"account_name":it.get("advertiserName"),
             "parent_id":None,"parent_name":None,"channel":"巨量千川",
