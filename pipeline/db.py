@@ -61,6 +61,27 @@ def dedupe_migrated_accounts(conn):
     conn.commit()
     return total
 
+# ============================ 同平台多登录去重 ============================
+# 规则背景：同一广告账户被共享给了同平台的多个登录，两个登录都会抓到、各写一行（主键含 login_account），
+# 导致账户看板同账户两行、汇总翻倍。保留权威登录，删冗余登录下「同账户·同日·同层级」的重复行。
+# 以后再遇到这种共享，往下表加一行即可（(平台, 冗余登录tag, 权威登录tag)）。
+LOGIN_DEDUP = [
+    ("微橙", "微橙·SKG", "微橙·skg-盛德佳润"),   # 微橙·SKG 抓的账户全是盛德佳润的子集，冗余
+]
+def dedupe_duplicate_logins(conn):
+    """删除同平台多登录重复行（冗余登录方，权威登录已有同账户·同日·同层级行时）。返回删除行数。"""
+    total = 0
+    with conn.cursor() as cur:
+        for platform, stale_login, keep_login in LOGIN_DEDUP:
+            cur.execute("""DELETE FROM ad_daily a
+                WHERE a.platform=%s AND a.login_account=%s AND EXISTS (
+                    SELECT 1 FROM ad_daily b WHERE b.platform=%s AND b.login_account=%s
+                    AND b.entity_id=a.entity_id AND b.date=a.date AND b.level=a.level)""",
+                (platform, stale_login, platform, keep_login))
+            total += cur.rowcount
+    conn.commit()
+    return total
+
 def done_set(conn, platform=None, login=None):
     q = "SELECT platform,login_account,level,date FROM crawl_progress"
     cond=[]; args=[]
