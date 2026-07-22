@@ -102,10 +102,13 @@ def fetch_xfj_account(login,day):
         page+=1; time.sleep(0.1)
     out=[]
     for it in items:
-        cost=_num(it.get('cost'))
-        if not cost: continue
-        cost/=M; pay=(_num(it.get('cid_trans_payment_amount')) or 0)/M; rpay=(_num(it.get('cid_trans_real_payment_amount')) or 0)/M
-        dpay=(_num(it.get('adx_metric_326')) or 0)/M; drpay=(_num(it.get('cid_trans_direct_real_payment_amount')) or 0)/M
+        cost=_num(it.get('cost')) or 0
+        pay=_num(it.get('cid_trans_payment_amount')) or 0; rpay=_num(it.get('cid_trans_real_payment_amount')) or 0
+        dpay=_num(it.get('adx_metric_326')) or 0; drpay=_num(it.get('cid_trans_direct_real_payment_amount')) or 0
+        # 直推/真实付款按「付款日」记账，会回流到无消费的天(点击在前、付款在后)。消费0但有付款/订单的行也要保留，
+        # 否则整段区间求和会漏掉这些回流，导致汇总比小飞机页面偏低。
+        if not (cost or pay or rpay or dpay or drpay or _num(it.get('cid_trans_order_num'))): continue
+        cost/=M; pay/=M; rpay/=M; dpay/=M; drpay/=M
         eid=str(it.get('AccountExternalId') or '')
         out.append({"entity_id":eid,"entity_name":it.get('AccountName'),
             "account_id":eid,"account_name":it.get('AccountName'),
@@ -147,10 +150,12 @@ def fetch_xfj(login,level,day):
         items+=got
     out=[]
     for it in items:
-        cost=_num(it.get('cost'))
-        if not cost: continue
-        cost/=M; pay=(_num(it.get('cid_trans_payment_amount')) or 0)/M; rpay=(_num(it.get('cid_trans_real_payment_amount')) or 0)/M
-        dpay=(_num(it.get('adx_metric_326')) or 0)/M; drpay=(_num(it.get('cid_trans_direct_real_payment_amount')) or 0)/M
+        cost=_num(it.get('cost')) or 0
+        pay=_num(it.get('cid_trans_payment_amount')) or 0; rpay=_num(it.get('cid_trans_real_payment_amount')) or 0
+        dpay=_num(it.get('adx_metric_326')) or 0; drpay=_num(it.get('cid_trans_direct_real_payment_amount')) or 0
+        # 付款按「付款日」回流到无消费的天，消费0但有付款/订单的行也要保留(否则区间求和漏计回流)
+        if not (cost or pay or rpay or dpay or drpay or _num(it.get('cid_trans_order_num'))): continue
+        cost/=M; pay/=M; rpay/=M; dpay/=M; drpay/=M
         out.append({"entity_id":str(_first(it,cfg["id"])),"entity_name":_first(it,cfg["name"]),
             "account_id":str(_first(it,cfg["acc_id"]) or ""),"account_name":_first(it,cfg["acc_name"]),
             "parent_id":str(_first(it,cfg["par_id"]) or "") or None,"parent_name":_first(it,cfg["par_name"]),
