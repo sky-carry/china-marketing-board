@@ -31,13 +31,13 @@ cd pipeline; python auth_login.py <账号ID>       # 弹浏览器人工登录（
 
 ## 双实例：本地 + 服务器
 
-本地（Windows，端口 8770，本机 Postgres 5432）和服务器（124.223.55.175，Docker，端口 8060，容器内 db / 宿主机 5433 仅本机）各跑一套完整系统。**改动先在本地做好验证，用户明确说"推到服务器"才部署**；排查报错先分清来自哪套实例。
+本地（Windows，端口 8770，本机 Postgres 5432）和服务器（**生产：120.79.214.225**，Docker，端口 8060 与 80，容器内 db / 宿主机 5433 仅本机）各跑一套完整系统。**改动先在本地做好验证，用户明确说"推到服务器"才部署**；排查报错先分清来自哪套实例。（旧机器 124.223.55.175 已弃用，别再往那部署。）
 
 服务器部署（详见 `docs/运维手册.md` / `docs/DEPLOY.md`）：
 
 ```bash
-ssh root@124.223.55.175
-cd /root/china-marketing-board
+ssh root@120.79.214.225
+cd /home/code/china-marketing-board
 git pull && docker compose up -d --build app   # 只重建 app，db 不动；多阶段 Dockerfile 会自动构建前端
 docker compose logs -f app
 ```
@@ -61,7 +61,7 @@ docker compose logs -f app
 
 ## 注意事项
 
-- 新增数据库列/表时同步更新 `pipeline/comments.sql`（中文列注释）并在库里执行。
+- **新增数据库表/列必须同时加中文注释**（`COMMENT ON TABLE/COLUMN ... IS '...'`）：同步更新 `pipeline/scripts/comments.sql`（可重复执行的注释脚本），并在**本地 + 服务器两个库**都执行。查漏光标（应为 0）：`SELECT c.relname||'.'||a.attname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace AND n.nspname='public' JOIN pg_attribute a ON a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped LEFT JOIN pg_description d ON d.objoid=c.oid AND d.objsubid=a.attnum WHERE c.relkind='r' AND d.description IS NULL;`
 - 抓取相关改动要考虑限流：沸点接口有 42901 限流（已做串行化+退避），改 fetchers 时别破坏。
 - `归档/` 是历史归档目录，不参与运行。
 - 本机有终端安全软件（DLP）会加密部分文件（如 `.gitignore` 读出来是二进制乱码）——遇到"文件损坏/非PK头"类问题先怀疑它，不是代码 bug。

@@ -156,6 +156,43 @@ COMMENT ON COLUMN users.is_active      IS '是否允许登录（禁用某人置 
 COMMENT ON COLUMN users.is_admin       IS '管理员标记（预留，供以后分权限用）';
 COMMENT ON COLUMN users.first_login_at IS '首次登录时间';
 COMMENT ON COLUMN users.last_login_at  IS '最近登录时间';
+COMMENT ON COLUMN users.id             IS '主键';
 COMMENT ON COLUMN users.login_count    IS '累计登录次数';
 COMMENT ON COLUMN users.created_at     IS '创建时间';
 COMMENT ON COLUMN users.updated_at     IS '更新时间';
+
+-- ============================ auth_users 补充字段（外部账号 + 数据范围授权） ============================
+COMMENT ON COLUMN auth_users.name           IS '显示名';
+COMMENT ON COLUMN auth_users.is_admin       IS '是否管理员（内置 skg=true；外部账号一律 false，进不了管理页）';
+COMMENT ON COLUMN auth_users.is_active      IS '是否启用（false 禁止登录）';
+COMMENT ON COLUMN auth_users.note           IS '备注';
+COMMENT ON COLUMN auth_users.expires_at     IS '有效期（到期后无法登录；NULL=长期）';
+COMMENT ON COLUMN auth_users.scope_agencies IS '数据范围-授权代理商列表(jsonb数组；仅普通用户受限，空=看不到数据)';
+COMMENT ON COLUMN auth_users.scope_stores   IS '数据范围-授权店铺列表(jsonb数组)';
+COMMENT ON COLUMN auth_users.scope_accounts IS '数据范围-授权账户ID列表(jsonb数组)';
+COMMENT ON COLUMN auth_users.first_login_at IS '首次登录时间';
+COMMENT ON COLUMN auth_users.last_login_at  IS '最近登录时间';
+COMMENT ON COLUMN auth_users.login_count    IS '累计登录次数';
+COMMENT ON COLUMN auth_users.created_at     IS '创建时间';
+
+-- ============================ column_presets 自定义列「常用列」预设 ============================
+COMMENT ON TABLE  column_presets            IS '自定义列「常用列」预设（账户看板/订单明细的列配置，可共享/私有）';
+COMMENT ON COLUMN column_presets.id         IS '主键';
+COMMENT ON COLUMN column_presets.page       IS '页面标识（account_board=账户看板 / orders=订单明细）';
+COMMENT ON COLUMN column_presets.owner      IS '归属用户标识（token sub：飞书 open_id 或 密码账户 username）';
+COMMENT ON COLUMN column_presets.owner_name IS '归属用户显示名（展示用）';
+COMMENT ON COLUMN column_presets.name       IS '常用列预设名称';
+COMMENT ON COLUMN column_presets.is_shared  IS '是否共享（管理员/主账号保存=true 全员可套用；普通用户=false 仅自己可见）';
+COMMENT ON COLUMN column_presets.columns    IS '有序列配置 JSON：[{key,pinned}]';
+COMMENT ON COLUMN column_presets.created_at IS '创建时间';
+COMMENT ON COLUMN column_presets.updated_at IS '更新时间';
+
+-- ============================ user_activity 用户网页停留时长 ============================
+COMMENT ON TABLE  user_activity           IS '用户网页停留时长统计（前端每30秒心跳上报累计）';
+COMMENT ON COLUMN user_activity.user_key  IS '用户标识（token sub：飞书 open_id 或 密码账户 username）';
+COMMENT ON COLUMN user_activity.date       IS '日期';
+COMMENT ON COLUMN user_activity.seconds    IS '当日累计停留秒数';
+COMMENT ON COLUMN user_activity.updated_at IS '更新时间';
+
+-- ============================ orders 补充字段 ============================
+COMMENT ON COLUMN orders.product_id IS '商品ID（小飞机=skuId/item_id，微橙=item_id，麦斯=pay_item_id，沸点无）';
