@@ -1034,19 +1034,13 @@ def realtime_board(request:Request, date:str=None):
     c=db(); cur=c.cursor()
     # 今日各账户 ad_daily 聚合（消耗/直投成交/退款率*消耗）
     cur.execute(f"""SELECT entity_id, max(entity_name) entity_name, SUM(cost) cost,
+        SUM(real_pay_amount) rpay, SUM(real_orders) rord,
         SUM(direct_real_orders) dro, SUM(direct_real_pay_amount) drp, SUM(refund_rate*cost) rrn
         FROM ad_daily WHERE level=ANY(%s) AND date=%s AND cost>0{sc} GROUP BY entity_id""",[ACCOUNT_LEVELS,day]+sx)
     today={r["entity_id"]:dict(r) for r in cur.fetchall()}
-    # 昨日各账户消耗
-    cur.execute(f"SELECT entity_id, SUM(cost) cost FROM ad_daily WHERE level=ANY(%s) AND date=%s{sc} GROUP BY entity_id",[ACCOUNT_LEVELS,yday]+sx)
-    ycost={r["entity_id"]:float(r["cost"] or 0) for r in cur.fetchall()}
-    # 今日/昨日 各账户「当天真实付款」（orders：点击=付款同日 且 已付款类）
-    def rt_by_acct(dd):
-        cur.execute(f"""SELECT o.ad_account_id eid, SUM(o.pay_amount) pay, count(*) n FROM orders o
-            WHERE o.pay_time::date=%s AND o.click_time IS NOT NULL AND o.pay_time::date=o.click_time::date
-              AND o.order_status ~ %s GROUP BY o.ad_account_id""",(dd,_PAID_STATUS_RE))
-        return {r["eid"]:(float(r["pay"] or 0), int(r["n"])) for r in cur.fetchall()}
-    trt=rt_by_acct(day); yrt=rt_by_acct(yday)
+    # 昨日各账户消耗 + 退后付款金额
+    cur.execute(f"SELECT entity_id, SUM(cost) cost, SUM(real_pay_amount) rpay FROM ad_daily WHERE level=ANY(%s) AND date=%s{sc} GROUP BY entity_id",[ACCOUNT_LEVELS,yday]+sx)
+    ycost={r["entity_id"]:(float(r["cost"] or 0), float(r["rpay"] or 0)) for r in cur.fetchall()}
     cur.execute("SELECT * FROM account_meta"); meta={r["entity_id"]:dict(r) for r in cur.fetchall()}
     cur.execute("SELECT max(fetched_at) t FROM ad_daily WHERE date=%s",(day,)); last_upd=cur.fetchone()["t"]
     c.close()
@@ -1056,8 +1050,8 @@ def realtime_board(request:Request, date:str=None):
         t=today[eid]
         a["cost"]+=float(t["cost"] or 0); a["dro"]+=float(t["dro"] or 0); a["drp"]+=float(t["drp"] or 0)
         a["rrn"]+=float(t["rrn"] or 0)
-        p,n=trt.get(eid,(0,0)); a["real_pay"]+=p; a["real_orders"]+=n
-        a["y_cost"]+=ycost.get(eid,0); a["y_real_pay"]+=yrt.get(eid,(0,0))[0]
+        a["real_pay"]+=float(t["rpay"] or 0); a["real_orders"]+=int(t["rord"] or 0)   # 退后付款/订单取 ad_daily(真实退后)
+        yc,yp=ycost.get(eid,(0,0)); a["y_cost"]+=yc; a["y_real_pay"]+=yp                # 昨日退后付款取 ad_daily
     def merge(a,b):
         for k in a: a[k]+=b[k]
         return a
