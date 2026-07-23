@@ -63,12 +63,12 @@
             </template>
             <!-- 季度：GSV达成 / 退后ROI -->
             <template v-for="q in quarters" :key="q.key">
-              <td class="num">{{ gsvFull(r.q[q.key]?.gsv) }}</td>
+              <td class="num">{{ gsvWan(r.q[q.key]?.gsv) }}</td>
               <td class="num strong">{{ roiFmt(r.q[q.key]?.roi) }}</td>
             </template>
             <!-- 分月：GSV达成 / ROI -->
             <template v-for="m in months" :key="m.key">
-              <td class="num">{{ gsvFull(r.m[m.key]?.gsv) }}</td>
+              <td class="num">{{ gsvWan(r.m[m.key]?.gsv) }}</td>
               <td class="num strong">{{ roiFmt(r.m[m.key]?.roi) }}</td>
             </template>
             <!-- 近7天 当天GSV -->
@@ -130,7 +130,6 @@ const dateText = computed(() => {
 
 // —— 格式化 ——
 const roiFmt  = v => v == null ? '/' : Number(v).toFixed(2)
-const gsvFull = v => v == null ? '/' : Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const gsvWan  = v => v == null ? '/' : (Number(v) / 10000).toFixed(1) + '万'
 
 // —— 迷你图 ——
