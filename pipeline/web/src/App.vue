@@ -5,7 +5,7 @@
   <el-container v-else style="height:100%">
     <el-aside :width="isCollapse ? '64px' : '200px'" style="background:#20222a;transition:width .2s">
       <div class="side-head" :class="{ collapsed: isCollapse }">
-        <span v-show="!isCollapse" class="side-title">📊 投放数据平台</span>
+        <span v-show="!isCollapse" class="side-title">📊 SKG 站外投放</span>
         <el-icon class="collapse-btn" :title="isCollapse ? '展开侧栏' : '收起侧栏'" @click="toggleCollapse">
           <Expand v-if="isCollapse" /><Fold v-else />
         </el-icon>

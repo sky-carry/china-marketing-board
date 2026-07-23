@@ -61,24 +61,24 @@ import { Refresh } from '@element-plus/icons-vue'
 
 // 列定义：6 维度 + 12 指标（表头与飞书「实时数据」sheet 一致）
 const COLS = [
-  { key:'category',    label:'类目',   dim:true, w:70 },
-  { key:'product',     label:'投放产品', dim:true, w:96 },
-  { key:'ecom_platform', label:'电商平台', dim:true, w:74 },
-  { key:'store',       label:'店铺',   dim:true, w:64 },
-  { key:'ad_channel',  label:'投放渠道', dim:true, w:84 },
-  { key:'agency',      label:'代理商', dim:true, w:90 },
-  { key:'cost',        label:'消耗',   w:96 },
-  { key:'real_orders', label:'退后订单数', w:88 },
-  { key:'real_pay',    label:'退后付款金额', w:106 },
-  { key:'real_roi',    label:'退后ROI', w:80 },
-  { key:'roi_vs_yesterday', label:'对比昨日退后ROI', w:118 },
-  { key:'refund_rate', label:'退款率', w:72 },
-  { key:'direct_real_orders', label:'单品退后订单数', w:106 },
-  { key:'direct_real_pay', label:'单品退后付款', w:104 },
-  { key:'direct_real_roi', label:'单品退后ROI', w:96 },
-  { key:'y_cost',      label:'昨日消耗', w:96, tip:'总计行为昨日全量(昨天所有在投账户，与账户看板对齐)；明细行为各账户自己的昨日' },
-  { key:'y_real_pay',  label:'昨日退后付款金额', w:118, tip:'总计行为昨日全量(与账户看板选昨日的合计一致)；明细行为各账户自己的昨日' },
-  { key:'y_real_roi',  label:'昨日退后ROI', w:104, tip:'总计行为昨日全量ROI；明细行为各账户自己的昨日ROI' },
+  { key:'category',    label:'类目',   dim:true, w:58 },
+  { key:'product',     label:'投放产品', dim:true, w:86 },
+  { key:'ecom_platform', label:'电商平台', dim:true, w:60 },
+  { key:'store',       label:'店铺',   dim:true, w:52 },
+  { key:'ad_channel',  label:'投放渠道', dim:true, w:68 },
+  { key:'agency',      label:'代理商', dim:true, w:76 },
+  { key:'cost',        label:'消耗',   w:80 },
+  { key:'real_orders', label:'退后订单数', w:56 },
+  { key:'real_pay',    label:'退后付款金额', w:88 },
+  { key:'real_roi',    label:'退后ROI', w:52 },
+  { key:'roi_vs_yesterday', label:'对比昨日退后ROI', w:60 },
+  { key:'refund_rate', label:'退款率', w:50 },
+  { key:'direct_real_orders', label:'单品退后订单数', w:60 },
+  { key:'direct_real_pay', label:'单品退后付款', w:84 },
+  { key:'direct_real_roi', label:'单品退后ROI', w:56 },
+  { key:'y_cost',      label:'昨日消耗', w:80, tip:'总计行为昨日全量(昨天所有在投账户，与账户看板对齐)；明细行为各账户自己的昨日' },
+  { key:'y_real_pay',  label:'昨日退后付款金额', w:88, tip:'总计行为昨日全量(与账户看板选昨日的合计一致)；明细行为各账户自己的昨日' },
+  { key:'y_real_roi',  label:'昨日退后ROI', w:56, tip:'总计行为昨日全量ROI；明细行为各账户自己的昨日ROI' },
 ]
 
 const data = ref({ rows: [], date: '', updated_at: '', active_accounts: 0 })
@@ -162,16 +162,17 @@ defineExpose({ load })
 .rt-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; }
 
 .rt-table { border-collapse: collapse; width: 100%; font-size: 12px; white-space: nowrap; }
-.rt-table th, .rt-table td { border: 1px solid #b8bcc4; padding: 5px 8px; }   /* 边框偏深，便于分辨数据 */
+.rt-table th, .rt-table td { border: 1px solid #b8bcc4; padding: 4px 5px; }   /* 边框偏深，便于分辨数据；留空收紧 */
 .rt-table thead th {
   position: sticky; top: 0; z-index: 2; background: #f5f7fa; color: #303133;
   font-weight: 600; text-align: center; border-bottom: 1px solid #a8abb2;
+  white-space: normal; line-height: 1.25;   /* 表头过长自动换两行，避免列过宽 */
 }
 .rt-table td.dim { text-align: center; color: #303133; vertical-align: middle; }   /* 所有文字居中 */
 .rt-table td.merged { background: #fff; text-align: center; }   /* 合并单元格白底+居中 */
 .rt-table td.num { text-align: center; color: #303133; font-variant-numeric: tabular-nums; }
 .rt-table td.cat { font-weight: 600; color: #303133; background: #eef1f6; }   /* 类目列底色填充 */
-.rt-table td.prod { color: #606266; }
+.rt-table td.prod { color: #606266; font-weight: 600; }   /* 投放产品加粗 */
 .rt-table td.strong { font-weight: 600; }
 .rt-table td.muted { color: #c0c4cc; text-align: center; }
 .rt-table td.up { color: #2e9b5b; }
