@@ -15,7 +15,7 @@
       <table class="rt-table">
         <thead>
           <tr>
-            <th v-for="c in COLS" :key="c.key" :class="c.dim?'dim':'num'" :style="{minWidth:c.w+'px'}">{{ c.label }}</th>
+            <th v-for="c in COLS" :key="c.key" :class="c.dim?'dim':'num'" :style="{minWidth:c.w+'px'}" :title="c.tip">{{ c.label }}</th>
           </tr>
         </thead>
         <tbody>
@@ -76,9 +76,9 @@ const COLS = [
   { key:'direct_real_orders', label:'单品退后订单数', w:106 },
   { key:'direct_real_pay', label:'单品退后付款', w:104 },
   { key:'direct_real_roi', label:'单品退后ROI', w:96 },
-  { key:'y_cost',      label:'昨日消耗', w:96 },
-  { key:'y_real_pay',  label:'昨日退后付款金额', w:118 },
-  { key:'y_real_roi',  label:'昨日退后ROI', w:104 },
+  { key:'y_cost',      label:'昨日消耗', w:96, tip:'总计行为昨日全量(昨天所有在投账户，与账户看板对齐)；明细行为各账户自己的昨日' },
+  { key:'y_real_pay',  label:'昨日退后付款金额', w:118, tip:'总计行为昨日全量(与账户看板选昨日的合计一致)；明细行为各账户自己的昨日' },
+  { key:'y_real_roi',  label:'昨日退后ROI', w:104, tip:'总计行为昨日全量ROI；明细行为各账户自己的昨日ROI' },
 ]
 
 const data = ref({ rows: [], date: '', updated_at: '', active_accounts: 0 })

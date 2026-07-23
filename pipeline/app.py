@@ -1038,8 +1038,8 @@ def realtime_board(request:Request, date:str=None):
         SUM(direct_real_orders) dro, SUM(direct_real_pay_amount) drp, SUM(refund_rate*cost) rrn
         FROM ad_daily WHERE level=ANY(%s) AND date=%s AND cost>0{sc} GROUP BY entity_id""",[ACCOUNT_LEVELS,day]+sx)
     today={r["entity_id"]:dict(r) for r in cur.fetchall()}
-    # 昨日各账户消耗 + 退后付款金额
-    cur.execute(f"SELECT entity_id, SUM(cost) cost, SUM(real_pay_amount) rpay FROM ad_daily WHERE level=ANY(%s) AND date=%s{sc} GROUP BY entity_id",[ACCOUNT_LEVELS,yday]+sx)
+    # 昨日各账户消耗 + 退后付款金额（cost IS NOT NULL 与账户看板同口径，供总计行「全量昨日」用）
+    cur.execute(f"SELECT entity_id, SUM(cost) cost, SUM(real_pay_amount) rpay FROM ad_daily WHERE level=ANY(%s) AND date=%s AND cost IS NOT NULL{sc} GROUP BY entity_id",[ACCOUNT_LEVELS,yday]+sx)
     ycost={r["entity_id"]:(float(r["cost"] or 0), float(r["rpay"] or 0)) for r in cur.fetchall()}
     cur.execute("SELECT * FROM account_meta"); meta={r["entity_id"]:dict(r) for r in cur.fetchall()}
     cur.execute("SELECT max(fetched_at) t FROM ad_daily WHERE date=%s",(day,)); last_upd=cur.fetchone()["t"]
@@ -1103,7 +1103,16 @@ def realtime_board(request:Request, date:str=None):
     # —— 总计 ——
     tot=raw0()
     for v in combos.values(): merge(tot,v)
-    dt=derive(tot); dt.update(row_type="total", label="总计"); rows.append(dt)
+    dt=derive(tot); dt.update(row_type="total", label="总计")
+    # 总计行的「昨日」三列改用「全量昨日」：昨天所有在投账户(与账户看板选昨日同口径)，
+    # 而非仅今日在投账户；这样总计的昨日消耗/昨日退后付款能和账户看板对上。明细行的昨日仍是各账户自己的昨日。
+    yf_cost=sum(c for c,_ in ycost.values()); yf_pay=sum(p for _,p in ycost.values())
+    troi=tot["real_pay"]/tot["cost"] if tot["cost"] else None
+    yf_roi=yf_pay/yf_cost if yf_cost else None
+    dt["y_cost"]=round(yf_cost,2); dt["y_real_pay"]=round(yf_pay,2)
+    dt["y_real_roi"]=round(yf_roi,2) if yf_roi is not None else None
+    dt["roi_vs_yesterday"]=round(troi-yf_roi,2) if (troi is not None and yf_roi is not None) else None
+    rows.append(dt)
     # —— 电商平台(渠道) × 店铺 汇总段：京东盛德 / 京东-小计 / 天猫... ——
     ecoms=sorted({k[2] for k in combos if k[2]}, key=lambda x:x)
     for ec in ecoms:
