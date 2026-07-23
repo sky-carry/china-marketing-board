@@ -160,7 +160,7 @@ def me(request:Request):  # 能进到这里说明中间件已放行(token 有效
                 name=(r["name"] if r else None) or sub
             c.close()
         except Exception: pass
-    return {"ok":True,"admin":admin,"user":user,"name":name}
+    return {"ok":True,"admin":admin,"main":_is_main(request),"user":user,"name":name}
 
 @app.post("/api/heartbeat")
 def heartbeat(request:Request, body:dict=Body(...)):
@@ -194,6 +194,18 @@ def _req_user(request:Request):
     auth=request.headers.get("authorization",""); tok=auth[7:] if auth.startswith("Bearer ") else request.cookies.get("token","")
     d=_token_data(tok) or {}
     return (d.get("u"), bool(d.get("r")=="admin"))
+
+def _is_main(request:Request):
+    """主账号=密码登录的管理员(auth_users.is_admin，即内置 skg)。
+    飞书用户(含飞书管理员)与密码普通账号都不算；本地 dev 免登录视同主账号。"""
+    d=_req_token(request)
+    if not d or d.get("r")!="admin": return False
+    u=d.get("u")
+    if u=="dev": return bool(_feishu_cfg()["dev_login"])
+    c=db(); cur=c.cursor()
+    cur.execute("SELECT is_admin FROM auth_users WHERE username=%s",(u,))
+    row=cur.fetchone(); c.close()
+    return bool(row and row["is_admin"])
 
 @app.get("/api/column_presets")
 def list_column_presets(request:Request, page:str):
@@ -1162,6 +1174,7 @@ def _month_end(y,m): return (datetime.date(y,12,31) if m==12 else datetime.date(
 
 @app.get("/api/daily_report")
 def daily_report(request:Request, date:str=None):
+    if not _is_main(request): raise HTTPException(403,"日报看板仅主账号可见")
     today = datetime.date.fromisoformat(date) if date else datetime.datetime.now(_SH).date()
     Y=today.year; cur_m=today.month; cur_q=(cur_m-1)//3+1
     # 已完成季度：当年 Q1..cur_q-1（当前季度未完成，不算）
@@ -1255,9 +1268,8 @@ def daily_report(request:Request, date:str=None):
 
 @app.post("/api/daily_report/products")
 def set_daily_report_products(request:Request, body:dict=Body(...)):
-    """保存日报展示商品清单（仅管理员，全员共享）。products=null/[] 表示展示全部。"""
-    _sub,admin=_req_user(request)
-    if not admin: raise HTTPException(403,"仅管理员可修改展示商品")
+    """保存日报展示商品清单（仅主账号可见/可改）。products=null/[] 表示展示全部。"""
+    if not _is_main(request): raise HTTPException(403,"日报看板仅主账号可用")
     prods=body.get("products")
     val=None if not prods else list(prods)
     c=db(); c.autocommit=True; cur=c.cursor()

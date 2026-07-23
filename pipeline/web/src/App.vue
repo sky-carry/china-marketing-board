@@ -29,7 +29,7 @@
       <el-header style="background:#fff;border-bottom:1px solid #ebeef5;display:flex;align-items:center;justify-content:space-between">
         <div v-if="isBoard" class="hdr-tabs">
           <button :class="{ active: boardTab==='realtime' }" @click="setBoardTab('realtime')">实时数据</button>
-          <button :class="{ active: boardTab==='daily' }" @click="setBoardTab('daily')">日报看板</button>
+          <button v-if="isMain" :class="{ active: boardTab==='daily' }" @click="setBoardTab('daily')">日报看板</button>
           <button :class="{ active: boardTab==='overview' }" @click="setBoardTab('overview')">数据总览</button>
         </div>
         <span v-else style="font-size:16px;font-weight:600">{{ headerTitle }}</span>
@@ -76,6 +76,7 @@ const isLogin = computed(() => route.path === '/login')
 const username = ref(localStorage.getItem('authUser') || 'skg')
 const me = ref({})   // 当前登录用户(飞书资料，来自 /api/me)
 const isAdmin = ref(localStorage.getItem('authAdmin') === '1')   // 管理员(密码登录/授权) 才显示管理页
+const isMain = ref(localStorage.getItem('authMain') === '1')     // 主账号(密码管理员) 才显示日报看板
 const headerTitle = computed(() => route.params.name ? `平台明细 · ${route.params.name}` : route.meta.title)
 // 数据看板：header 里显示「实时数据/数据总览」标签，用 route.query.tab 驱动内容
 const isBoard = computed(() => route.path === '/board')
@@ -91,6 +92,7 @@ async function logout() {
   try { await ElMessageBox.confirm('确认退出登录？', '提示', { type: 'warning' }) } catch { return }
   localStorage.removeItem('authToken')
   localStorage.removeItem('authAdmin')
+  localStorage.removeItem('authMain')
   router.replace('/login')
 }
 async function savePwd() {
@@ -118,7 +120,9 @@ onMounted(async () => {
     if (data.user) me.value = data.user
     else if (data.name) me.value = { name: data.name }   // 密码账号：显示名
     isAdmin.value = !!data.admin
+    isMain.value = !!data.main
     localStorage.setItem('authAdmin', data.admin ? '1' : '0')
+    localStorage.setItem('authMain', data.main ? '1' : '0')
   } catch {}
   setInterval(heartbeat, 30000)
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') lastBeat = Date.now() })

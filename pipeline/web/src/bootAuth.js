@@ -11,6 +11,7 @@ if (qi >= 0) {
     localStorage.setItem('authToken', token)
     localStorage.setItem('authUser', params.get('name') || '飞书用户')
     localStorage.setItem('authAdmin', '0')   // 飞书默认普通用户，清掉上一次会话可能残留的 admin；/api/me 再按 is_admin 校正
+    localStorage.setItem('authMain', '0')    // 飞书登录一律非主账号(日报看板不可见)
     window.location.replace(window.location.pathname + '#/dashboard')   // 清掉带 token 的 hash
   }
 }

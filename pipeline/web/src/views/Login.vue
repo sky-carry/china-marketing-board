@@ -39,6 +39,7 @@ function finishLogin(token, user, admin) {
   localStorage.setItem('authToken', token)
   localStorage.setItem('authUser', user)
   localStorage.setItem('authAdmin', admin ? '1' : '0')
+  localStorage.setItem('authMain', admin ? '1' : '0')   // 密码/开发登录：管理员即主账号(日报看板可见)；/api/me 再校正
   // 整页刷新，让 App 以新身份重新初始化（否则从飞书切回管理员/换账号时，头像·姓名·权限仍是上一个账号的，要手动刷新）
   location.hash = '#' + (route.query.redirect || '/board')
   location.reload()
