@@ -199,11 +199,37 @@ def _req_user(request:Request):
 def list_column_presets(request:Request, page:str):
     sub,_admin=_req_user(request)
     c=db(); cur=c.cursor()
-    cur.execute("""SELECT id,page,owner,owner_name,name,is_shared,columns FROM column_presets
-        WHERE page=%s AND (is_shared=true OR owner=%s) ORDER BY is_shared DESC, updated_at DESC""",(page,sub))
+    cur.execute("""SELECT id,page,owner,owner_name,name,is_shared,is_default,columns FROM column_presets
+        WHERE page=%s AND (is_shared=true OR owner=%s) ORDER BY is_default DESC, is_shared DESC, updated_at DESC""",(page,sub))
     rows=cur.fetchall(); c.close()
     for r in rows: r["mine"]=(r["owner"]==sub)   # mine=本人所建(可删)
     return {"presets":rows}
+
+@app.get("/api/column_presets/default")
+def get_default_preset(request:Request, page:str):
+    """该页管理员设置的默认列(共享)；无则返回 null。供无本地配置的用户初始化。"""
+    c=db(); cur=c.cursor()
+    cur.execute("""SELECT id,name,columns FROM column_presets
+        WHERE page=%s AND is_default=true AND is_shared=true LIMIT 1""",(page,))
+    row=cur.fetchone(); c.close()
+    return {"preset":row}
+
+@app.post("/api/column_presets/{pid}/default")
+def set_default_preset(request:Request, pid:int):
+    """把某共享模板设为该页默认(仅管理员)；再次调用取消。每页仅一个默认。"""
+    _sub,admin=_req_user(request)
+    if not admin: raise HTTPException(403,"仅管理员可设置默认列")
+    c=db(); c.autocommit=True; cur=c.cursor()
+    cur.execute("SELECT page,is_shared,is_default FROM column_presets WHERE id=%s",(pid,))
+    row=cur.fetchone()
+    if not row: c.close(); raise HTTPException(404,"模板不存在")
+    if not row["is_shared"]: c.close(); raise HTTPException(400,"仅共享模板可设为默认")
+    if row["is_default"]:   # 已是默认 -> 取消
+        cur.execute("UPDATE column_presets SET is_default=false WHERE id=%s",(pid,)); c.close()
+        return {"ok":True,"is_default":False}
+    cur.execute("UPDATE column_presets SET is_default=false WHERE page=%s AND is_default=true",(row["page"],))
+    cur.execute("UPDATE column_presets SET is_default=true WHERE id=%s",(pid,)); c.close()
+    return {"ok":True,"is_default":True}
 
 @app.post("/api/column_presets")
 def save_column_preset(request:Request, body:dict=Body(...)):
@@ -1638,6 +1664,8 @@ def _ensure_tables():
         columns jsonb NOT NULL,             -- 有序列配置 [{key,pinned}]
         created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now(),
         UNIQUE(page, owner, name))""")
+    # 默认列：管理员可将某共享模板设为该页默认，每页仅一个；无本地配置的用户初始按它显示
+    cur.execute("ALTER TABLE column_presets ADD COLUMN IF NOT EXISTS is_default boolean DEFAULT false")
     # 看板全局配置(管理员维护、全员共享)：key=配置项(如 daily_visible_products 日报展示商品清单)，value=jsonb
     cur.execute("""CREATE TABLE IF NOT EXISTS report_config (
         key text PRIMARY KEY,               -- 配置项标识

@@ -254,7 +254,7 @@ const TIPS = {
   direct_real_roi: '直投成交ROI = 直投成交金额 / 消费',
 }
 const colLabel = k => COLMAP[k]?.label || k
-const STORAGE = 'accountBoardCols.v3'   // v3：按飞书sheet更新字段名/顺序 + 新增转化率
+const STORAGE = 'accountBoardCols.v4'   // v4：改用管理员默认列(一次性重置旧本地配置)；v3=按飞书sheet更新字段名/顺序+转化率
 
 // pinned: 用户勾选的左固定；默认沿用 COLS 里 pin:'left' 的列
 function defaultState() { return COLS.map(c => ({ key: c.key, visible: !c.hidden, pinned: c.pin === 'left' })) }
@@ -301,6 +301,22 @@ const visibleColumns = computed(() => {
 // 自定义列（复用 ColumnCustomizer 组件：自带按钮+下拉模板+配置弹窗）
 const isAdmin = ref(localStorage.getItem('authAdmin') === '1')
 function onColsApply(newState) { colState.value = newState; saveState() }
+
+// 无本地配置时套用管理员设置的默认列(全员共享)。不写本地：这样管理员改默认后仍能跟随；
+// 用户一旦自己调整(onColsApply→saveState)才落本地、不再跟默认。
+async function applyDefaultIfFresh() {
+  if (localStorage.getItem(STORAGE)) return               // 用户已有自己的配置，尊重之
+  try {
+    const { data } = await api.get('/column_presets/default', { params: { page: 'account_board' } })
+    const cols = data.preset?.columns
+    if (!Array.isArray(cols) || !cols.length) return
+    const arr = cols.filter(x => COLMAP[x.key]).map(x => ({ key: x.key, pinned: !!x.pinned }))
+    const picked = new Set(arr.map(s => s.key))
+    const st = arr.map(s => ({ key: s.key, visible: true, pinned: s.pinned }))
+    for (const c of COLS) if (!picked.has(c.key)) st.push({ key: c.key, visible: false, pinned: false })
+    colState.value = st
+  } catch {}
+}
 
 // ================= 数据加载 =================
 async function load() {
@@ -380,6 +396,7 @@ async function confirmTag(row) {
 async function removeTag(row, i) { row.tags = row.tags.filter((_,j)=>j!==i); await saveTags(row) }
 
 onMounted(async () => {
+  applyDefaultIfFresh()
   try { const { data } = await api.get('/meta'); if (data.platforms?.length) platforms.value = data.platforms } catch {}
   try { const { data } = await api.get('/account_board_meta'); boardMeta.value = data } catch {}
   const t = new Date(); const today = `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`

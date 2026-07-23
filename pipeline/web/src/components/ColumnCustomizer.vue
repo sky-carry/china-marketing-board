@@ -12,8 +12,13 @@
       <div class="ccp-list">
         <div v-for="p in presets" :key="p.id" class="ccp-item" @click="applyPreset(p)">
           <span class="ccp-name" :title="p.name">{{ p.name }}</span>
+          <el-tag v-if="p.is_default" type="warning" size="small" effect="dark" class="ccp-tag">默认</el-tag>
           <el-tag :type="p.is_shared ? 'success' : 'info'" size="small" effect="plain" class="ccp-tag">{{ p.is_shared ? '共享' : '私有' }}</el-tag>
           <span class="ccp-ops">
+            <el-icon v-if="admin && p.is_shared" class="ccp-ic" :class="{ 'ccp-star': p.is_default }"
+              :title="p.is_default ? '取消默认列' : '设为默认列(无自定义的用户默认看到)'" @click.stop="setDefault(p)">
+              <StarFilled v-if="p.is_default" /><Star v-else />
+            </el-icon>
             <el-icon v-if="p.mine || admin" class="ccp-ic" title="编辑该模板" @click.stop="editPreset(p)"><Edit /></el-icon>
             <el-icon class="ccp-ic" title="复制为新模板" @click.stop="copyPreset(p)"><CopyDocument /></el-icon>
             <el-icon v-if="p.mine || admin" class="ccp-ic ccp-del" title="删除该模板" @click.stop="deletePreset(p)"><Delete /></el-icon>
@@ -91,7 +96,7 @@
 import { ref, computed } from 'vue'
 import api from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, Delete, Operation, Edit, CopyDocument } from '@element-plus/icons-vue'
+import { Search, Delete, Operation, Edit, CopyDocument, Star, StarFilled } from '@element-plus/icons-vue'
 
 const props = defineProps({
   modelValue: { type: Array, default: () => [] },   // colState [{key,visible,pinned}]
@@ -212,6 +217,14 @@ async function savePreset() {
   } catch (e) { ElMessage.error('保存失败：' + (e.response?.data?.detail || e.message)) }
   finally { saving.value = false }
 }
+// —— 管理员：设/取消默认列（全员共享，无本地配置的用户初始按它显示）——
+async function setDefault(p) {
+  try {
+    const { data } = await api.post(`/column_presets/${p.id}/default`)
+    await fetchPresets()
+    ElMessage.success(data.is_default ? `已将「${p.name}」设为默认列` : '已取消默认列')
+  } catch (e) { ElMessage.error('设置失败：' + (e.response?.data?.detail || e.message)) }
+}
 async function deletePreset(p) {
   try {
     await ElMessageBox.confirm(`删除模板「${p.name}」？`, '确认', { type: 'warning' })
@@ -238,6 +251,8 @@ function apply() { emit('update:modelValue', buildState(sel.value)); dlg.value =
 .ccp-ic { color: #a8abb2; cursor: pointer; font-size: 15px; }
 .ccp-ic:hover { color: #409EFF; }
 .ccp-del:hover { color: #f56c6c; }
+.ccp-star { color: #e6a23c; }
+.ccp-star:hover { color: #e6a23c; }
 .ccp-empty { color: #c0c4cc; font-size: 12px; text-align: center; padding: 20px 8px; line-height: 1.8; }
 /* 配置弹窗面板 */
 .cc-panel { border: 1px solid #ebeef5; border-radius: 8px; margin-bottom: 12px; overflow: hidden; }
