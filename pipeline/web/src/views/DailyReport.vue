@@ -20,7 +20,13 @@
     </div>
 
     <div class="dr-scroll" v-loading="loading">
-      <table ref="tableEl" class="dr-table" :style="{ '--sub-top': subTop + 'px' }">
+      <div ref="captureEl" class="cap-wrap" :class="{ capturing }">
+        <!-- 复制为图片时才显示的标题(与看板一致，无按钮)，随图片一起导出 -->
+        <div v-if="capturing" class="cap-head">
+          <div class="cap-title">站外 CID 投放日报 【{{ dateText }}】</div>
+          <div class="cap-note">GSV实时更新退款数据，近7日数据因退款退货，存在小幅波动</div>
+        </div>
+        <table ref="tableEl" class="dr-table" :style="{ '--sub-top': subTop + 'px' }">
         <thead>
           <tr>
             <th class="dim" rowspan="2" style="min-width:64px">类目</th>
@@ -51,12 +57,8 @@
             <template v-if="r.kind==='label2'">
               <td class="dim label" colspan="2">{{ r.label }}</td>
             </template>
-            <template v-else-if="r.kind==='catRow'">
-              <td class="dim cat" @click="toggle(r.category)"><span class="tog">{{ collapsed.has(r.category)?'▸':'▾' }}</span>{{ r.category||'未分类' }}</td>
-              <td class="dim"></td>
-            </template>
             <template v-else>
-              <td v-if="r.catSpan>0" class="dim cat merged" :rowspan="r.catSpan>1 ? r.catSpan : null" @click="toggle(r.catName)"><span class="tog">▾</span>{{ r.catName||'未分类' }}</td>
+              <td v-if="r.catSpan>0" class="dim cat merged" :rowspan="r.catSpan>1 ? r.catSpan : null">{{ r.catName||'未分类' }}</td>
               <td class="dim prod">{{ r.product }}</td>
             </template>
             <!-- 季度：GSV达成 / 退后ROI -->
@@ -80,6 +82,7 @@
           </tr>
         </tbody>
       </table>
+      </div>
       <div v-if="!displayRows.length && !loading" class="dr-empty">暂无数据</div>
     </div>
 
@@ -114,7 +117,6 @@ import { toBlob } from 'html-to-image'
 const isAdmin = localStorage.getItem('authAdmin') === '1'
 const data = ref({ rows: [], quarters: [], months: [], days: [], products: [], visible_products: null, date: '' })
 const loading = ref(false)
-const collapsed = reactive(new Set())      // 已折叠的类目
 
 const quarters = computed(() => data.value.quarters || [])
 const months = computed(() => data.value.months || [])
@@ -148,10 +150,8 @@ function lineGeom(arr) {
 const linePts = arr => lineGeom(arr).filter(Boolean).map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')
 const lineDots = arr => lineGeom(arr).filter(Boolean)
 
-// —— 折叠 ——
-function toggle(cat) { collapsed.has(cat) ? collapsed.delete(cat) : collapsed.add(cat) }
-// 维度渲染：合计/电商=整行标签(label2)；类目→产品用「类目纵向合并单元格 + 产品行」(图二 Excel 风)；
-// 折叠时收成一行显示该类目小计(catRow)。后端已按展示商品过滤产品行；合计/电商/类目小计恒全量。
+// 维度渲染：合计/电商=整行标签(label2)；类目→产品用「类目纵向合并单元格 + 产品行」(图二 Excel 风)。
+// 无产品的类目不展示；后端已按展示商品过滤产品行；合计/电商小计恒全量。
 const displayRows = computed(() => {
   const src = data.value.rows || []
   const out = []
@@ -164,8 +164,8 @@ const displayRows = computed(() => {
       let j = i + 1
       while (j < src.length && src[j].row_type === 'product' && src[j].category === cat) { prods.push(src[j]); j++ }
       i = j - 1
-      if (collapsed.has(cat) || prods.length === 0) { out.push({ ...r, kind: 'catRow' }) }
-      else prods.forEach((p, idx) => out.push({ ...p, kind: 'prod', catName: cat, catSpan: idx === 0 ? prods.length : 0 }))
+      if (prods.length === 0) continue   // 无产品的类目不展示
+      prods.forEach((p, idx) => out.push({ ...p, kind: 'prod', catName: cat, catSpan: idx === 0 ? prods.length : 0 }))
     }
   }
   return out
@@ -196,13 +196,14 @@ async function savePick() {
   finally { picking.value = false }
 }
 
-// —— 复制为图片：优先剪贴板，失败自动下载 ——
-const tableEl = ref(null); const imging = ref(false)
+// —— 复制为图片：优先剪贴板，失败自动下载。导出含标题(cap-head)，并临时关掉吸顶表头 ——
+const tableEl = ref(null); const captureEl = ref(null); const imging = ref(false); const capturing = ref(false)
 async function copyImg() {
-  if (!tableEl.value) return
-  imging.value = true
+  if (!captureEl.value) return
+  imging.value = true; capturing.value = true
   try {
-    const blob = await toBlob(tableEl.value, { backgroundColor: '#ffffff', pixelRatio: 2 })
+    await nextTick()
+    const blob = await toBlob(captureEl.value, { backgroundColor: '#ffffff', pixelRatio: 2 })
     if (!blob) throw new Error('生成图片失败')
     try {
       if (window.isSecureContext && navigator.clipboard && window.ClipboardItem) {
@@ -216,7 +217,7 @@ async function copyImg() {
       ElMessage.success('已下载为图片（当前非 https，无法直接写剪贴板）')
     }
   } catch (e) { ElMessage.error('生成图片失败：' + (e.message || e)) }
-  finally { imging.value = false }
+  finally { capturing.value = false; imging.value = false }
 }
 
 // 双层吸顶表头：第二行 top 必须等于第一行实测高度，否则两行之间会露出滚动内容(白缝)。
@@ -249,6 +250,13 @@ defineExpose({ load })
   display: flex; align-items: center; gap: 6px; }
 .dr-note { font-size: 12px; opacity: .78; max-width: 400px; }
 .dr-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; }
+/* 截图容器：宽度随表格(比视口宽时也完整导出)；标题随图片一起 */
+.cap-wrap { width: fit-content; min-width: 100%; }
+.cap-head { background: #20222a; color: #fff; padding: 10px 16px; text-align: center; }
+.cap-title { font-size: 18px; font-weight: 700; }
+.cap-note { font-size: 12px; opacity: .82; margin-top: 4px; }
+/* 截图时关掉吸顶，避免表头浮动错位 */
+.cap-wrap.capturing .dr-table thead th { position: static !important; }
 
 .dr-table { border-collapse: collapse; font-size: 12px; white-space: nowrap; background: #fff; }
 .dr-table th, .dr-table td { border: 1px solid #c6cad2; padding: 4px 8px; text-align: center; }
@@ -264,13 +272,11 @@ th.dim  { background: #f5f7fa; }
 
 .dr-table td.dim { text-align: left; color: #303133; }
 .dr-table td.dim.label { text-align: center; font-weight: 700; }
-.dr-table td.dim.cat { text-align: center; vertical-align: middle; font-weight: 600;
-  background: #f2f5e9; cursor: pointer; user-select: none; }
+.dr-table td.dim.cat { text-align: center; vertical-align: middle; font-weight: 600; background: #f2f5e9; }
 .dr-table td.dim.prod { text-align: left; color: #606266; }
 .dr-table td.num { color: #303133; font-variant-numeric: tabular-nums; }
 .dr-table td.strong { font-weight: 600; }
 .dr-table td.spark { padding: 2px 4px; }
-.tog { color: #909399; margin-right: 4px; user-select: none; }
 
 /* 行类型底色 */
 .dr-total td { background: #dbe6f3; font-weight: 700; }

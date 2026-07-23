@@ -1174,9 +1174,9 @@ def daily_report(request:Request, date:str=None):
     for m in range(3*cur_q-2, cur_m+1):
         s=datetime.date(Y,m,1); e=today if m==cur_m else _month_end(Y,m)
         months.append({"key":f"{Y}-{m:02d}","label":f"{Y}年{m}月","start":s,"end":e})
-    # 近 7 天
+    # 近 7 天（从昨天往前算，不含当天）
     days=[]
-    for i in range(6,-1,-1):
+    for i in range(7,0,-1):
         d=today-datetime.timedelta(days=i)
         days.append({"key":d.isoformat(),"label":f"{d.month}月{d.day}日","d":d})
     span_start=min([q["start"] for q in quarters]+[m["start"] for m in months]+[days[0]["d"]])
