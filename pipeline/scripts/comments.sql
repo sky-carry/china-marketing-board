@@ -194,5 +194,11 @@ COMMENT ON COLUMN user_activity.date       IS '日期';
 COMMENT ON COLUMN user_activity.seconds    IS '当日累计停留秒数';
 COMMENT ON COLUMN user_activity.updated_at IS '更新时间';
 
+-- ============================ report_config 看板全局配置 ============================
+COMMENT ON TABLE  report_config            IS '看板全局配置（管理员维护、全员共享），key/value';
+COMMENT ON COLUMN report_config.key        IS '配置项标识（如 daily_visible_products=日报展示商品清单）';
+COMMENT ON COLUMN report_config.value      IS '配置值 JSON（如展示商品数组；null=展示全部）';
+COMMENT ON COLUMN report_config.updated_at IS '更新时间';
+
 -- ============================ orders 补充字段 ============================
 COMMENT ON COLUMN orders.product_id IS '商品ID（小飞机=skuId/item_id，微橙=item_id，麦斯=pay_item_id，沸点无）';

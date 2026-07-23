@@ -1129,6 +1129,117 @@ def realtime_board(request:Request, date:str=None):
     return {"date":day, "updated_at":fmt_dt(last_upd),
             "active_accounts":len(today), "rows":rows}
 
+# ============================ 日报看板（站外 CID 投放日报） ============================
+# 维度：电商平台(京东/天猫) + 类目→产品；列：已完成季度(退后ROI) + 未完成季度分月(GSV/退后ROI) + 近7天分日(GSV+退后ROI)
+# GSV=真实付款(退款后成交额 real_pay_amount)；退后ROI=真实付款/消耗。全部退后口径，实时聚合(不建预聚合表，避免退款追溯变动导致过期)。
+def _month_end(y,m): return (datetime.date(y,12,31) if m==12 else datetime.date(y,m+1,1)-datetime.timedelta(days=1))
+
+@app.get("/api/daily_report")
+def daily_report(request:Request, date:str=None):
+    today = datetime.date.fromisoformat(date) if date else datetime.datetime.now(_SH).date()
+    Y=today.year; cur_m=today.month; cur_q=(cur_m-1)//3+1
+    # 已完成季度：当年 Q1..cur_q-1（当前季度未完成，不算）
+    quarters=[]
+    for q in range(1,cur_q):
+        s=datetime.date(Y,3*q-2,1); e=_month_end(Y,3*q)
+        quarters.append({"key":f"{Y}Q{q}","label":f"{Y}Q{q}","start":s,"end":e})
+    # 未完成(当前)季度已过月份：季度首月..当前月（当月截至今天）
+    months=[]
+    for m in range(3*cur_q-2, cur_m+1):
+        s=datetime.date(Y,m,1); e=today if m==cur_m else _month_end(Y,m)
+        months.append({"key":f"{Y}-{m:02d}","label":f"{Y}年{m}月","start":s,"end":e})
+    # 近 7 天
+    days=[]
+    for i in range(6,-1,-1):
+        d=today-datetime.timedelta(days=i)
+        days.append({"key":d.isoformat(),"label":f"{d.month}月{d.day}日","d":d})
+    span_start=min([q["start"] for q in quarters]+[m["start"] for m in months]+[days[0]["d"]])
+    # 日期 -> 归属桶
+    dq={}; dm={}; dd={}
+    for q in quarters:
+        cur=q["start"]
+        while cur<=q["end"]: dq[cur.isoformat()]=q["key"]; cur+=datetime.timedelta(days=1)
+    for m in months:
+        cur=m["start"]
+        while cur<=m["end"]: dm[cur.isoformat()]=m["key"]; cur+=datetime.timedelta(days=1)
+    for i,day in enumerate(days): dd[day["d"].isoformat()]=i
+
+    scond,sval=_scope_cond(request); sc=f" AND {scond}" if scond else ""
+    sx=[sval] if sval is not None else []
+    c=db(); cur=c.cursor()
+    cur.execute(f"""SELECT entity_id, date::text d, SUM(cost) cost, SUM(real_pay_amount) pay
+        FROM ad_daily WHERE level=ANY(%s) AND cost IS NOT NULL AND date BETWEEN %s AND %s{sc}
+        GROUP BY entity_id, date""",[ACCOUNT_LEVELS, span_start.isoformat(), today.isoformat()]+sx)
+    daily=cur.fetchall()
+    cur.execute("SELECT * FROM account_meta"); meta={r["entity_id"]:dict(r) for r in cur.fetchall()}
+    cur.execute("SELECT value FROM report_config WHERE key='daily_visible_products'"); rc=cur.fetchone()
+    visible=set(rc["value"]) if (rc and rc["value"]) else None   # None=全部展示
+    cur.execute("SELECT max(fetched_at) t FROM ad_daily WHERE date=%s",(today.isoformat(),)); last_upd=cur.fetchone()["t"]
+    c.close()
+
+    def new_node(): return {"q":{}, "m":{}, "d":[[0.0,0.0] for _ in days]}
+    def acc(node, qk, mk, di, cost, pay):
+        if qk: b=node["q"].setdefault(qk,[0.0,0.0]); b[0]+=cost; b[1]+=pay
+        if mk: b=node["m"].setdefault(mk,[0.0,0.0]); b[0]+=cost; b[1]+=pay
+        if di is not None: node["d"][di][0]+=cost; node["d"][di][1]+=pay
+    total=new_node(); ecoms={}; cats={}; catprods={}; prod_all=set()
+    for r in daily:
+        m=meta.get(r["entity_id"]) or {}
+        ep=(m.get("ecom_platform") or "").strip(); ca=(m.get("category") or "").strip(); pr=(m.get("product") or "").strip()
+        if ca and pr: prod_all.add((ca,pr))
+        cost=float(r["cost"] or 0); pay=float(r["pay"] or 0)
+        qk=dq.get(r["d"]); mk=dm.get(r["d"]); di=dd.get(r["d"])
+        targets=[total]
+        if ep: targets.append(ecoms.setdefault(ep,new_node()))
+        if ca: targets.append(cats.setdefault(ca,new_node()))
+        if ca and pr: targets.append(catprods.setdefault((ca,pr),new_node()))
+        for nd in targets: acc(nd, qk, mk, di, cost, pay)
+
+    def roi(cost,pay): return round(pay/cost,2) if cost else None
+    def emit(node):
+        return {
+            "q":{q["key"]: {"gsv":round(node["q"].get(q["key"],[0,0])[1],2),
+                             "roi":roi(*node["q"].get(q["key"],[0,0]))} for q in quarters},
+            "m":{mm["key"]: {"gsv":round(node["m"].get(mm["key"],[0,0])[1],2),
+                              "roi":roi(*node["m"].get(mm["key"],[0,0]))} for mm in months},
+            "dg":[round(node["d"][i][1],2) for i in range(len(days))],   # 分日 GSV
+            "dr":[roi(*node["d"][i]) for i in range(len(days))],          # 分日 退后ROI
+        }
+    rows=[]
+    # 站外合计
+    r0=emit(total); r0.update(row_type="total", label="站外合计"); rows.append(r0)
+    # 京东/天猫… 电商平台小计（京东、天猫优先，其余按名）
+    order={"京东":0,"天猫":1}
+    for ep in sorted(ecoms, key=lambda x:(order.get(x,9), x)):
+        r=emit(ecoms[ep]); r.update(row_type="ecom", label=ep); rows.append(r)
+    # 类目 → 产品（类目行可折叠；产品行受展示商品筛选影响，类目/小计/合计恒全量）
+    for ca in sorted(cats, key=lambda x:(x=="", x)):
+        r=emit(cats[ca]); r.update(row_type="category", category=ca); rows.append(r)
+        prods=sorted([p for (c2,p) in catprods if c2==ca], key=lambda x:x)
+        for pr in prods:
+            if visible is not None and pr not in visible: continue
+            r=emit(catprods[(ca,pr)]); r.update(row_type="product", category=ca, product=pr); rows.append(r)
+    return {"date":today.isoformat(), "updated_at":fmt_dt(last_upd),
+            "quarters":[{"key":q["key"],"label":q["label"]} for q in quarters],
+            "months":[{"key":m["key"],"label":m["label"]} for m in months],
+            "days":[{"key":d["key"],"label":d["label"]} for d in days],
+            "products":sorted([{"category":c2,"product":p} for (c2,p) in prod_all], key=lambda x:(x["category"],x["product"])),
+            "visible_products":(sorted(visible) if visible is not None else None),
+            "rows":rows}
+
+@app.post("/api/daily_report/products")
+def set_daily_report_products(request:Request, body:dict=Body(...)):
+    """保存日报展示商品清单（仅管理员，全员共享）。products=null/[] 表示展示全部。"""
+    _sub,admin=_req_user(request)
+    if not admin: raise HTTPException(403,"仅管理员可修改展示商品")
+    prods=body.get("products")
+    val=None if not prods else list(prods)
+    c=db(); c.autocommit=True; cur=c.cursor()
+    cur.execute("""INSERT INTO report_config(key,value) VALUES('daily_visible_products',%s)
+        ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()""",
+        (psycopg2.extras.Json(val),))
+    c.close(); return {"ok":True}
+
 @app.post("/api/account_tags")
 def set_account_tags(body:dict=Body(...)):
     c=db(); c.autocommit=True; cur=c.cursor()
@@ -1527,6 +1638,11 @@ def _ensure_tables():
         columns jsonb NOT NULL,             -- 有序列配置 [{key,pinned}]
         created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now(),
         UNIQUE(page, owner, name))""")
+    # 看板全局配置(管理员维护、全员共享)：key=配置项(如 daily_visible_products 日报展示商品清单)，value=jsonb
+    cur.execute("""CREATE TABLE IF NOT EXISTS report_config (
+        key text PRIMARY KEY,               -- 配置项标识
+        value jsonb,                        -- 配置值(如展示商品数组)
+        updated_at timestamptz DEFAULT now())""")
     c.close()
 
 def _seed_and_schedule():
