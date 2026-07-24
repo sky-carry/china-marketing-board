@@ -460,8 +460,58 @@ def fetch_fk(login,level,day):
             "direct_real_orders":_i(it.get("directDischargeBackGoodsCount")),"direct_real_pay_amount":_r(it.get("directDischargeBackGoodsPrice")),"direct_real_roi":_r(it.get("directDischargeBackROI"))})
     return out
 
-FETCH={"小飞机":fetch_xfj,"沸点":fetch_fd,"微橙":fetch_wc,"麦斯":fetch_ms,"方块":fetch_fk,"博擎":fetch_bq}
-LEVELS={"小飞机":list(XFJ_LEVELS)+["素材"],"沸点":list(FD_LEVELS),"微橙":list(WC_LEVELS),"麦斯":list(MS_LEVELS),"方块":["账户"],"博擎":list(BQ_LEVELS)}
+# ============================ 阿里妈妈 UD 智汇投(ud.alimama.com) ============================
+# UDS 账户级报表：POST advertiser/horizontal/findPage.json，每个账户指标在 reportInfoList[0]。
+# 字段对照见 docs/各平台抓取说明.md「UDS」列。金额=元、ROI 自然值，无需缩放。
+# 认证=登录 cookie(auth.cookie)；阿里/淘宝登录有强反爬，无法自动重登，cookie 需人工定期刷。
+# csrfId/dynamicToken 服务器不严格校验(过期值也可)，存 auth 里即可。isRt：当天=实时 true，历史=false。
+ALM_FIELDS=("grantBalance,charge,alipayInshopNum,alipayInshopAmt,afterRefundAlipayAmt,afterRefundAlipayNum,"
+ "afterRefundRoi,afterRefundAlipayDirNum,afterRefundAlipayDirAmt,afterRefundAlipayDirRoi,convertNums,convertCost,"
+ "roi,alipayInshopCost,alipayDirNum,alipayDirAmt,dirRoi,alipayDirCost,refundRate,adPv,ecpm,click,ctr,ecpc")
+def fetch_alimama(login,level,day):
+    a=login["auth"]; ds=day.isoformat()
+    rpt={"fields":ALM_FIELDS,"conditionList":[{"sourceList":["scene","advertiser_list"],"adzonePkgIdList":[],
+        "effectEqual":"15","unifyType":"last_click_sync_async","startTime":ds,"endTime":ds,
+        "isRt": day>=datetime.date.today()}]}
+    hdr={"accept":"application/json, text/javascript, */*; q=0.01","bx-v":"2.5.37",
+         "content-type":"application/x-www-form-urlencoded; charset=UTF-8","cookie":a["cookie"],
+         "origin":"https://ud.alimama.com","referer":"https://ud.alimama.com/index.html",
+         "user-agent":UA,"x-requested-with":"XMLHttpRequest"}
+    items=[]; offset=0
+    while True:
+        body={"bizCode":"udSmart","directMediaId":"tou_tiao","unifyTimeType":"alipayTime","offset":offset,"pageSize":100,
+              "orderField":"charge","orderBy":"desc","rptQuery":json.dumps(rpt,ensure_ascii=False),
+              "timeStr":a.get("timeStr",""),"dynamicToken":a.get("dynamicToken",""),"csrfId":a.get("csrfId","")}
+        req=urllib.request.Request("https://ud.alimama.com/advertiser/horizontal/findPage.json",
+            data=urllib.parse.urlencode(body).encode(),headers=hdr,method="POST")
+        d=(json.loads(urllib.request.urlopen(req,timeout=60).read().decode("utf-8","replace")).get("data") or {})
+        page=d.get("list") or []; items+=page
+        if offset+len(page)>=d.get("count",0) or not page: break
+        offset+=len(page); time.sleep(0.2)
+    out=[]
+    for it in items:
+        ri=(it.get("reportInfoList") or [{}])[0]
+        cost=_num(ri.get("charge")) or 0
+        pay=_num(ri.get("alipayInshopAmt")) or 0; rpay=_num(ri.get("afterRefundAlipayAmt")) or 0
+        dpay=_num(ri.get("alipayDirAmt")) or 0; drpay=_num(ri.get("afterRefundAlipayDirAmt")) or 0
+        # 消费0但有成交/单品/订单的行也保留(退款回流到无消费的天)
+        if not (cost or pay or rpay or dpay or drpay or _num(ri.get("alipayInshopNum"))): continue
+        eid=str(it.get("directAdvertiserId") or "")
+        out.append({"entity_id":eid,"entity_name":it.get("name"),
+            "account_id":eid,"account_name":it.get("name"),
+            "parent_id":None,"parent_name":None,"channel":"阿里妈妈UD",
+            "cost":_r(cost),"impressions":_i(ri.get("adPv")),"clicks":_i(ri.get("click")),
+            "ctr":_r(ri.get("ctr")),"cpm":_r(ri.get("ecpm")),"cpc":_r(ri.get("ecpc")),
+            "conversions":_i(ri.get("convertNums")),"conversion_cost":_r(ri.get("convertCost")),
+            "orders":_i(ri.get("alipayInshopNum")),"pay_amount":_r(pay),"roi":_r(ri.get("roi")),
+            "real_pay_amount":_r(rpay),"real_orders":_i(ri.get("afterRefundAlipayNum")),"real_roi":_r(ri.get("afterRefundRoi")),
+            "refund_rate":_r(ri.get("refundRate")),
+            "direct_orders":_i(ri.get("alipayDirNum")),"direct_pay_amount":_r(dpay),"direct_roi":_r(ri.get("dirRoi")),
+            "direct_real_orders":_i(ri.get("afterRefundAlipayDirNum")),"direct_real_pay_amount":_r(drpay),"direct_real_roi":_r(ri.get("afterRefundAlipayDirRoi"))})
+    return out
+
+FETCH={"小飞机":fetch_xfj,"沸点":fetch_fd,"微橙":fetch_wc,"麦斯":fetch_ms,"方块":fetch_fk,"博擎":fetch_bq,"阿里妈妈":fetch_alimama}
+LEVELS={"小飞机":list(XFJ_LEVELS)+["素材"],"沸点":list(FD_LEVELS),"微橙":list(WC_LEVELS),"麦斯":list(MS_LEVELS),"方块":["账户"],"博擎":list(BQ_LEVELS),"阿里妈妈":["账户"]}
 
 def fetch(login,level,day):
     """返回归一化 dict 列表（含 platform/login_account/level/date）"""
