@@ -67,7 +67,7 @@ def _token_data(token):
 _PUBLIC_API={"/api/login","/api/health","/api/auth_config","/api/feishu/login_url","/api/feishu/callback","/api/dev_login"}
 # 管理员专属接口(账号管理/用户管理/定时任务页)——仅密码登录(skg)或 is_admin 用户可访问
 _ADMIN_PREFIXES=("/api/accounts","/api/adv_accounts","/api/account_meta","/api/account_tags","/api/users","/api/tasks","/api/runs","/api/keep_tokens",
-                 "/api/auth_accounts","/api/scope_options")
+                 "/api/auth_accounts","/api/scope_options","/api/feishu_hidden_accounts")
 def _is_admin_path(p):
     return any(p==x or p.startswith(x+"/") for x in _ADMIN_PREFIXES)
 @app.middleware("http")
@@ -113,9 +113,29 @@ def _scope_ids(request:Request):
         ids |= {r["entity_id"] for r in cur.fetchall()}
     c.close(); return list(ids)
 
+def _feishu_hidden():
+    """对飞书登录用户屏蔽的账户ID列表(report_config.feishu_hidden_accounts，管理员在用户管理页维护)。"""
+    c=db(); cur=c.cursor()
+    cur.execute("SELECT value FROM report_config WHERE key='feishu_hidden_accounts'")
+    row=cur.fetchone(); c.close()
+    return [str(x) for x in (row["value"] or [])] if row else []
+
 def _scope_cond(request:Request, col="entity_id"):
-    """返回 (sql条件 or None, 参数值 or None)。None=不加过滤；'false'=空结果(无授权范围)。"""
-    ids=_scope_ids(request)
+    """返回 (sql条件 or None, 参数值 or None)。None=不加过滤；'false'=空结果(无授权范围)。
+    密码普通账号=白名单(scope_*)；飞书登录用户(含飞书管理员)=排除屏蔽名单；主账号/本地dev=不过滤。"""
+    d=_req_token(request)
+    u=d.get("u") if d else None
+    if not u: return None, None
+    if u=="dev": return None, None                     # 本地开发免登录视同主账号
+    c=db(); cur=c.cursor()
+    cur.execute("SELECT is_admin FROM auth_users WHERE username=%s",(u,))
+    pw_row=cur.fetchone(); c.close()
+    if pw_row is None:                                  # 飞书登录用户(含飞书管理员)：排除屏蔽账户
+        hidden=_feishu_hidden()
+        if not hidden: return None, None
+        return f"NOT ({col} = ANY(%s))", hidden
+    if pw_row["is_admin"]: return None, None            # 主账号(密码管理员)
+    ids=_scope_ids(request)                             # 密码普通账号：按勾选范围白名单
     if ids is None: return None, None
     if not ids: return "false", None
     return f"{col} = ANY(%s)", ids
@@ -402,6 +422,21 @@ def set_user_active(body:dict=Body(...)):
     if not uid: raise HTTPException(400,"缺少 id")
     c=db(); c.autocommit=True; cur=c.cursor()
     cur.execute("UPDATE users SET is_active=%s,updated_at=now() WHERE id=%s",(bool(body.get("is_active")),uid))
+    c.close(); return {"ok":True}
+
+# ============================ 飞书屏蔽账户(管理员) ============================
+# 名单内账户的数据对所有飞书登录用户(含飞书管理员)隐藏：各看板/明细/总计整体剔除；密码账号不受影响。
+@app.get("/api/feishu_hidden_accounts")
+def get_feishu_hidden_accounts():
+    return {"accounts":_feishu_hidden()}
+
+@app.post("/api/feishu_hidden_accounts")
+def set_feishu_hidden_accounts(body:dict=Body(...)):
+    val=[str(x) for x in (body.get("accounts") or [])]
+    c=db(); c.autocommit=True; cur=c.cursor()
+    cur.execute("""INSERT INTO report_config(key,value) VALUES('feishu_hidden_accounts',%s)
+        ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()""",
+        (psycopg2.extras.Json(val),))
     c.close(); return {"ok":True}
 
 # ============================ 账号密码用户管理(管理员) ============================

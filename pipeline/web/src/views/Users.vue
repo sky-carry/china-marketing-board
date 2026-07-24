@@ -69,7 +69,8 @@
       <el-tab-pane :label="`飞书登录（${fsRows.length}）`" name="feishu">
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
           <span style="color:#909399;font-size:13px">飞书扫码登录自动建号（公司内部）；禁用后无法再次登录。飞书普通用户默认可看全部数据。</span>
-          <el-button size="small" :loading="fsLoading" @click="loadFs" style="margin-left:auto">刷新</el-button>
+          <el-button size="small" type="warning" plain @click="openHidden" style="margin-left:auto">飞书屏蔽账户{{ hiddenIds.length ? `（${hiddenIds.length}）` : '' }}</el-button>
+          <el-button size="small" :loading="fsLoading" @click="loadFs">刷新</el-button>
         </div>
         <el-table :data="fsRows" v-loading="fsLoading" size="small" border stripe style="width:100%">
           <el-table-column label="头像" width="66" align="center">
@@ -143,6 +144,22 @@
       <template #footer>
         <el-button @click="dlg=false">取消</el-button>
         <el-button type="primary" :loading="saving" @click="save">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 飞书屏蔽账户：名单内账户数据对所有飞书登录用户(含飞书管理员)隐藏，看板/明细/总计整体剔除 -->
+    <el-dialog v-model="hiddenDlg" title="飞书屏蔽账户" width="560">
+      <div style="color:#909399;font-size:12px;margin-bottom:10px">
+        选中账户的数据将对<b>所有飞书登录用户（含飞书管理员）</b>隐藏：各看板、明细、总计整体剔除该账户。
+        密码账号按自身数据范围走，不受此名单影响；skg 主账号始终可见全部。
+      </div>
+      <el-select v-model="hiddenSel" multiple filterable clearable collapse-tags collapse-tags-tooltip
+        placeholder="选择要屏蔽的账户（可多选、按名称搜索）" style="width:100%">
+        <el-option v-for="a in scopeOpt.accounts" :key="a.id" :label="a.name" :value="a.id" />
+      </el-select>
+      <template #footer>
+        <el-button @click="hiddenDlg=false">取消</el-button>
+        <el-button type="primary" :loading="hiddenSaving" @click="saveHidden">保存</el-button>
       </template>
     </el-dialog>
   </div>
@@ -245,5 +262,21 @@ async function toggleFs(row, v) {
   finally { row._saving = false }
 }
 
-onMounted(() => { loadPw(); loadScopeOptions(); loadFs() })
+// ---------- 飞书屏蔽账户 ----------
+const hiddenIds = ref([]); const hiddenSel = ref([]); const hiddenDlg = ref(false); const hiddenSaving = ref(false)
+async function loadHidden() {
+  try { const { data } = await api.get('/feishu_hidden_accounts'); hiddenIds.value = data.accounts || [] } catch {}
+}
+function openHidden() { hiddenSel.value = [...hiddenIds.value]; hiddenDlg.value = true }
+async function saveHidden() {
+  hiddenSaving.value = true
+  try {
+    await api.post('/feishu_hidden_accounts', { accounts: hiddenSel.value })
+    hiddenIds.value = [...hiddenSel.value]
+    ElMessage.success('已保存，飞书用户刷新页面后生效'); hiddenDlg.value = false
+  } catch (e) { ElMessage.error(e.response?.data?.detail || '保存失败') }
+  finally { hiddenSaving.value = false }
+}
+
+onMounted(() => { loadPw(); loadScopeOptions(); loadFs(); loadHidden() })
 </script>

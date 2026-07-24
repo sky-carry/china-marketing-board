@@ -197,7 +197,7 @@ COMMENT ON COLUMN user_activity.updated_at IS '更新时间';
 
 -- ============================ report_config 看板全局配置 ============================
 COMMENT ON TABLE  report_config            IS '看板全局配置（管理员维护、全员共享），key/value';
-COMMENT ON COLUMN report_config.key        IS '配置项标识（如 daily_visible_products=日报展示商品清单）';
+COMMENT ON COLUMN report_config.key        IS '配置项标识（daily_visible_products=日报展示商品清单；feishu_hidden_accounts=对飞书登录用户屏蔽的账户ID列表）';
 COMMENT ON COLUMN report_config.value      IS '配置值 JSON（如展示商品数组；null=展示全部）';
 COMMENT ON COLUMN report_config.updated_at IS '更新时间';
 
