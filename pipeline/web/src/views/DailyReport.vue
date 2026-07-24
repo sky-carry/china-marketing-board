@@ -9,7 +9,7 @@
       </span>
       <span class="dr-heading">站外 CID 投放日报<span class="dr-date"> 【{{ dateText }}】</span></span>
       <span class="dr-right">
-        <span class="dr-note">GSV实时更新退款数据，近7日数据因退款退货，存在小幅波动</span>
+        <span class="dr-note">GSV实时更新退后数据，近7日及月度GSV因退款退货，存在小幅波动</span>
         <el-button size="small" text style="color:#fff" :loading="imging" @click="copyImg">
           <el-icon><Picture /></el-icon>复制为图片
         </el-button>
@@ -24,7 +24,7 @@
         <!-- 复制为图片时才显示的标题(与看板一致，无按钮)，随图片一起导出 -->
         <div v-if="capturing" class="cap-head">
           <div class="cap-title">站外 CID 投放日报 【{{ dateText }}】</div>
-          <div class="cap-note">GSV实时更新退款数据，近7日数据因退款退货，存在小幅波动</div>
+          <div class="cap-note">GSV实时更新退后数据，近7日及月度GSV因退款退货，存在小幅波动</div>
         </div>
         <table ref="tableEl" class="dr-table" :style="{ '--sub-top': subTop + 'px' }">
         <thead>
@@ -33,9 +33,9 @@
             <th class="dim" rowspan="2" style="min-width:96px">产品</th>
             <th v-for="q in quarters" :key="q.key" class="grp qgrp" colspan="2">{{ q.label }}</th>
             <th v-for="m in months" :key="m.key" class="grp mgrp" colspan="2">{{ m.label }}</th>
-            <th class="grp dgrp" :colspan="days.length">当天GSV</th>
+            <th class="grp dgrp" :colspan="days.length">退后GSV</th>
             <th class="grp sgrp" rowspan="2" style="min-width:70px">近7日<br>GSV变化</th>
-            <th class="grp rgrp" :colspan="days.length">当天退后ROI</th>
+            <th class="grp rgrp" :colspan="days.length">退后ROI</th>
             <th class="grp sgrp" rowspan="2" style="min-width:70px">近7日<br>ROI变化</th>
           </tr>
           <tr>
@@ -243,7 +243,7 @@ defineExpose({ load })
 .dr-title { background: #20222a; color: #fff; padding: 8px 14px; display: flex; align-items: center;
   justify-content: center; flex: none; position: relative; min-height: 32px; }
 .dr-heading { font-size: 18px; font-weight: 700; text-align: center; }
-.dr-date { font-weight: 400; opacity: .92; }
+.dr-date { font-weight: 700; opacity: .92; }   /* 标题日期与标题同等加粗 */
 .dr-left { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); display: flex; }
 .dr-right { position: absolute; right: 14px; top: 50%; transform: translateY(-50%);
   display: flex; align-items: center; gap: 6px; }
@@ -254,7 +254,8 @@ defineExpose({ load })
 .cap-head { background: #20222a; color: #fff; padding: 10px 16px; text-align: center; }
 .cap-title { font-size: 18px; font-weight: 700; }
 .cap-note { font-size: 12px; opacity: .82; margin-top: 4px; }
-/* 截图时关掉吸顶，避免表头浮动错位 */
+/* 截图时关掉吸顶，避免表头浮动错位；并去掉 min-width，宽屏下导出图右侧不留空白 */
+.cap-wrap.capturing { min-width: 0; }
 .cap-wrap.capturing .dr-table thead th { position: static !important; }
 
 .dr-table { border-collapse: collapse; font-size: 12px; white-space: nowrap; background: #fff; }
@@ -272,7 +273,7 @@ th.dim  { background: #f5f7fa; }
 .dr-table td.dim { text-align: left; color: #303133; }
 .dr-table td.dim.label { text-align: center; font-weight: 700; }
 .dr-table td.dim.cat { text-align: center; vertical-align: middle; font-weight: 600; background: #f2f5e9; }
-.dr-table td.dim.prod { text-align: left; color: #606266; }
+.dr-table td.dim.prod { text-align: left; color: #606266; font-weight: 600; }   /* 产品列加粗 */
 .dr-table td.num { color: #303133; font-variant-numeric: tabular-nums; }
 .dr-table td.strong { font-weight: 600; }
 .dr-table td.spark { padding: 2px 4px; }

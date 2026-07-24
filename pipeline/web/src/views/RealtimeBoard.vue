@@ -15,7 +15,9 @@
       <table class="rt-table">
         <thead>
           <tr>
-            <th v-for="c in COLS" :key="c.key" :class="c.dim?'dim':'num'" :style="{minWidth:c.w+'px'}" :title="c.tip">{{ c.label }}</th>
+            <th v-for="c in COLS" :key="c.key" :class="c.dim?'dim':'num'" :style="{minWidth:c.w+'px'}" :title="c.tip">
+              <span v-for="(ln,li) in labelLines(c.label)" :key="li" class="th-line">{{ ln }}</span>
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -37,12 +39,13 @@
             <td class="num">{{ money(r.cost) }}</td>
             <td class="num">{{ int(r.real_orders) }}</td>
             <td class="num">{{ money(r.real_pay) }}</td>
-            <td class="num strong">{{ roi(r.real_roi) }}</td>
+            <td class="num strong" :class="r.row_type==='detail' ? roiCls(r.real_roi) : null">{{ roi(r.real_roi) }}</td>
             <td class="num" :class="deltaCls(r.roi_vs_yesterday)">{{ delta(r.roi_vs_yesterday) }}</td>
             <td class="num" :class="{ warn: r.refund_rate>=30 }">{{ pct(r.refund_rate) }}</td>
             <td class="num">{{ int(r.direct_real_orders) }}</td>
             <td class="num">{{ money(r.direct_real_pay) }}</td>
             <td class="num">{{ roi(r.direct_real_roi) }}</td>
+            <td class="num">{{ pct(payRatio(r)) }}</td>
             <td class="num">{{ money(r.y_cost) }}</td>
             <td class="num">{{ money(r.y_real_pay) }}</td>
             <td class="num">{{ roi(r.y_real_roi) }}</td>
@@ -76,6 +79,7 @@ const COLS = [
   { key:'direct_real_orders', label:'单品退后订单数', w:60 },
   { key:'direct_real_pay', label:'单品退后付款', w:84 },
   { key:'direct_real_roi', label:'单品退后ROI', w:56 },
+  { key:'direct_pay_ratio', label:'单品退后付款占比', w:60, tip:'单品退后付款 / 退后付款金额' },
   { key:'y_cost',      label:'昨日消耗', w:80, tip:'总计行为昨日全量(昨天所有在投账户，与账户看板对齐)；明细行为各账户自己的昨日' },
   { key:'y_real_pay',  label:'昨日退后付款金额', w:88, tip:'总计行为昨日全量(与账户看板选昨日的合计一致)；明细行为各账户自己的昨日' },
   { key:'y_real_roi',  label:'昨日退后ROI', w:56, tip:'总计行为昨日全量ROI；明细行为各账户自己的昨日ROI' },
@@ -90,6 +94,21 @@ const roi   = v => v==null?'—':Number(v).toFixed(2)
 const pct   = v => v==null?'—':Number(v).toFixed(2)+'%'
 const delta = v => v==null?'—':(v>=0?'+':'')+Number(v).toFixed(2)
 const deltaCls = v => v==null?'':(v>=0?'up':'down')
+// 单品退后付款占比 = 单品退后付款 / 退后付款金额
+const payRatio = r => (r.direct_real_pay==null || !Number(r.real_pay)) ? null : Number(r.direct_real_pay)/Number(r.real_pay)*100
+// 退后ROI 条件底色(仅明细行)：>3 浅绿，<1 浅红
+const roiCls = v => v==null?'':(Number(v)>3?'roi-hi':(Number(v)<1?'roi-lo':''))
+// 表头第一行最多 4 个汉字，其余换行（如 对比昨日退后ROI -> 对比昨日 / 退后ROI）
+function labelLines(label) {
+  let cjk = 0
+  for (let i = 0; i < label.length; i++) {
+    if (/[一-鿿]/.test(label[i])) {
+      cjk++
+      if (cjk === 4 && i < label.length - 1) return [label.slice(0, i + 1), label.slice(i + 1)]
+    }
+  }
+  return [label]
+}
 
 // 标题：日期 -> 2026年7月20日；更新时间 -> 15时45分
 const dateText = computed(() => {
@@ -156,7 +175,7 @@ defineExpose({ load })
   padding: 10px 16px; display: flex; align-items: center; justify-content: center; flex: none; position: relative;
 }
 .rt-heading { text-align: center; }
-.rt-time { font-weight: 400; opacity: .9; font-size: 18px; }
+.rt-time { font-weight: 700; opacity: .9; font-size: 18px; }   /* 更新时间与标题同等加粗 */
 .rt-actions { display: flex; align-items: center; gap: 12px; position: absolute; right: 16px; top: 50%; transform: translateY(-50%); }
 .rt-meta { font-size: 12px; font-weight: 400; opacity: .8; }
 .rt-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; }
@@ -168,6 +187,7 @@ defineExpose({ load })
   font-weight: 600; text-align: center; border-bottom: 1px solid #a8abb2;
   white-space: normal; line-height: 1.25;   /* 表头过长自动换两行，避免列过宽 */
 }
+.rt-table thead th .th-line { display: block; }   /* 表头第一行最多4个汉字，剩余部分强制换行 */
 .rt-table td.dim { text-align: center; color: #303133; vertical-align: middle; }   /* 所有文字居中 */
 .rt-table td.merged { background: #fff; text-align: center; }   /* 合并单元格白底+居中 */
 .rt-table td.num { text-align: center; color: #303133; font-variant-numeric: tabular-nums; }
@@ -183,6 +203,9 @@ defineExpose({ load })
 
 /* 行类型底色（系统中性/蓝色调）。加粗规则：小计/总计行加粗；电商平台明细行(京东盛德等)不加粗 */
 .rt-detail:hover td { background: #f5f7fa; }
+/* 退后ROI 条件底色(仅明细行，放在 hover 规则之后保证悬停时不被盖掉) */
+.rt-table td.roi-hi { background: #e3f5e9; }
+.rt-table td.roi-lo { background: #fde9e7; }
 .rt-subtotal td { background: #e4e7ed; font-weight: 700; }
 .rt-total td { background: #ecf5ff; font-weight: 700; font-size: 12.5px; }
 .rt-platform td { background: #fafafa; font-weight: 400; }

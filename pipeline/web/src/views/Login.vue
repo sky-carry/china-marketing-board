@@ -1,7 +1,7 @@
 <template>
   <div class="login-wrap">
     <div class="login-card">
-      <div class="brand">📊 SKG站外数据</div>
+      <div class="brand">📊 SKG站外投放</div>
       <div class="sub">请登录后查看数据</div>
       <div v-if="errMsg" class="login-err">{{ errMsg }}</div>
       <el-form @submit.prevent="submit">
