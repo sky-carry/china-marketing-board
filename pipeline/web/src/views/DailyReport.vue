@@ -251,9 +251,9 @@ defineExpose({ load })
 .dr-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; }
 /* 截图容器：宽度随表格(比视口宽时也完整导出)；标题随图片一起 */
 .cap-wrap { width: fit-content; min-width: 100%; }
-.cap-head { background: #20222a; color: #fff; padding: 10px 16px; text-align: center; }
+.cap-head { background: #fff; color: #1a1d23; padding: 10px 16px; text-align: center; border-bottom: 1px solid #eceef1; }
 .cap-title { font-size: 18px; font-weight: 700; }
-.cap-note { font-size: 12px; opacity: .82; margin-top: 4px; }
+.cap-note { font-size: 12px; color: #8a929e; margin-top: 4px; }
 /* 截图时关掉吸顶，避免表头浮动错位；并去掉 min-width，宽屏下导出图右侧不留空白 */
 .cap-wrap.capturing { min-width: 0; }
 .cap-wrap.capturing .dr-table thead th { position: static !important; }
