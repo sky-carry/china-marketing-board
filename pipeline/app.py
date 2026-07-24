@@ -408,13 +408,16 @@ def set_user_active(body:dict=Body(...)):
 # 外部账号一律普通用户(is_admin=false)，按 代理商/账户 分配数据范围。内置 skg 为管理员，不可删/停。
 @app.get("/api/auth_accounts")
 def list_auth_accounts():
-    today=datetime.datetime.now(_SH).date().isoformat()
+    today_d=datetime.datetime.now(_SH).date()
+    today=today_d.isoformat(); d30_start=(today_d-datetime.timedelta(days=29)).isoformat()
     c=db(); cur=c.cursor()
     cur.execute("""SELECT au.username,au.name,au.is_admin,au.is_active,au.note,au.expires_at,
         au.scope_agencies,au.scope_stores,au.scope_accounts,au.first_login_at,au.last_login_at,au.login_count,au.created_at,
-        COALESCE(a.seconds,0) today_seconds
-        FROM auth_users au LEFT JOIN user_activity a ON a.user_key=au.username AND a.date=%s
-        ORDER BY au.is_admin DESC, au.created_at NULLS FIRST, au.username""",(today,))
+        COALESCE(a.seconds,0) today_seconds, COALESCE(d30.s,0) d30_seconds
+        FROM auth_users au
+        LEFT JOIN user_activity a ON a.user_key=au.username AND a.date=%s
+        LEFT JOIN (SELECT user_key, SUM(seconds) s FROM user_activity WHERE date>=%s GROUP BY user_key) d30 ON d30.user_key=au.username
+        ORDER BY au.is_admin DESC, au.created_at NULLS FIRST, au.username""",(today,d30_start))
     rows=[dict(r) for r in cur.fetchall()]
     for r in rows:
         r["expires_at"]=str(r["expires_at"]) if r["expires_at"] else None

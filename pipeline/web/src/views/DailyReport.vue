@@ -3,17 +3,17 @@
     <!-- 标题栏（与系统风格一致；左=展示商品，右=复制图片/刷新） -->
     <div class="dr-title">
       <span class="dr-left">
-        <el-button v-if="isAdmin" size="small" text style="color:#fff" @click="openPick">
+        <el-button v-if="isAdmin" size="small" text style="color:#606266" @click="openPick">
           <el-icon><Grid /></el-icon>展示商品
         </el-button>
       </span>
       <span class="dr-heading">站外 CID 投放日报<span class="dr-date"> 【{{ dateText }}】</span></span>
       <span class="dr-right">
         <span class="dr-note">GSV实时更新退后数据，近7日及月度GSV因退款退货，存在小幅波动</span>
-        <el-button size="small" text style="color:#fff" :loading="imging" @click="copyImg">
+        <el-button size="small" text style="color:#606266" :loading="imging" @click="copyImg">
           <el-icon><Picture /></el-icon>复制为图片
         </el-button>
-        <el-button size="small" text style="color:#fff" :loading="loading" @click="load">
+        <el-button size="small" text style="color:#606266" :loading="loading" @click="load">
           <el-icon><Refresh /></el-icon>刷新
         </el-button>
       </span>
@@ -240,14 +240,14 @@ defineExpose({ load })
 
 <style scoped>
 .dr-wrap { display: flex; flex-direction: column; height: 100%; min-height: 0; background: #fff; }
-.dr-title { background: #20222a; color: #fff; padding: 8px 14px; display: flex; align-items: center;
-  justify-content: center; flex: none; position: relative; min-height: 32px; }
+.dr-title { background: #fff; color: #1a1d23; padding: 8px 14px; display: flex; align-items: center;
+  justify-content: center; flex: none; position: relative; min-height: 32px; border-bottom: 1px solid #eceef1; }
 .dr-heading { font-size: 18px; font-weight: 700; text-align: center; }
 .dr-date { font-weight: 700; opacity: .92; }   /* 标题日期与标题同等加粗 */
 .dr-left { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); display: flex; }
 .dr-right { position: absolute; right: 14px; top: 50%; transform: translateY(-50%);
   display: flex; align-items: center; gap: 6px; }
-.dr-note { font-size: 12px; opacity: .78; max-width: 400px; }
+.dr-note { font-size: 12px; color: #8a929e; max-width: 400px; }
 .dr-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; }
 /* 截图容器：宽度随表格(比视口宽时也完整导出)；标题随图片一起 */
 .cap-wrap { width: fit-content; min-width: 100%; }

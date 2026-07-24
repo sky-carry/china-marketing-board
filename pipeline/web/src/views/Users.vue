@@ -43,6 +43,9 @@
           <el-table-column label="最近登录" width="160" align="center">
             <template #default="{ row }"><span style="white-space:nowrap">{{ row.last_login_at || '—' }}</span></template>
           </el-table-column>
+          <el-table-column label="近30天停留" width="110" align="center">
+            <template #default="{ row }">{{ dur(row.d30_seconds) }}</template>
+          </el-table-column>
           <el-table-column label="今日停留" width="100" align="center">
             <template #default="{ row }">{{ dur(row.today_seconds) }}</template>
           </el-table-column>

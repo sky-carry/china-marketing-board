@@ -3,7 +3,7 @@ html, body, #app { margin: 0; height: 100%; }
 body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; background: #f4f6fa; color: #303133; overflow: hidden; }
 
 /* 页面：填满内容区、纵向 flex、外层不出现滚动条 */
-.page { padding: 16px 20px; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+.page { padding: 16px 16px; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
 .page.page-scroll { overflow: auto; }          /* 需要整体滚动的页面（少用） */
 
 .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 14px; flex: none; }
@@ -22,3 +22,45 @@ body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; ba
 .controls { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-end; }
 .controls .lbl { font-size: 12px; color: #909399; margin-bottom: 4px; }
 @media (max-width: 900px) { .kpis { grid-template-columns: repeat(2, 1fr); } }
+
+/* ============================================================
+   主题：明亮简约 · 靛蓝（设计方案 1）
+   ============================================================ */
+:root {
+  /* Element Plus 主色 → 靛蓝 */
+  --el-color-primary: #4f46e5;
+  --el-color-primary-light-3: #726bea;
+  --el-color-primary-light-5: #a29bf1;
+  --el-color-primary-light-7: #d2cff8;
+  --el-color-primary-light-8: #e5e3fb;
+  --el-color-primary-light-9: #eeecfd;
+  --el-color-primary-dark-2: #3f38b7;
+  /* 圆角 & 边框 & 文字 */
+  --el-border-radius-base: 8px;
+  --el-border-color: #e6e8eb;
+  --el-border-color-light: #eceef1;
+  --el-border-color-lighter: #f0f2f4;
+  --el-fill-color-light: #f5f6f8;
+  --el-text-color-primary: #1a1d23;
+  --el-text-color-regular: #4b5563;
+  --el-text-color-secondary: #8a929e;
+  /* 表格 */
+  --el-table-border-color: #f0f2f4;
+  --el-table-header-bg-color: #fafbfc;
+  --el-table-header-text-color: #8a929e;
+  --el-table-row-hover-bg-color: #fafbff;
+}
+body { background: #f7f8fa; color: #1a1d23; }
+
+/* 卡片 / KPI 精致化：更大圆角、更轻边框、微阴影 */
+.card, .kpi { border-color: #eceef1; border-radius: 14px; box-shadow: 0 1px 2px rgba(20,24,40,.03); }
+.kpi .t { color: #6b7280; }
+.kpi .v { letter-spacing: -.5px; }
+.controls .lbl { color: #6b7280; }
+
+/* 按钮 / 输入：圆润 + 主按钮柔光 */
+.el-button { border-radius: 8px; font-weight: 500; }
+.el-button--primary { box-shadow: 0 2px 8px rgba(79,70,229,.25); }
+.el-table th.el-table__cell { font-weight: 600; }
+.el-tag { border-radius: 6px; }
+

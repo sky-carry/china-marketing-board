@@ -171,13 +171,14 @@ defineExpose({ load })
 <style scoped>
 .rt-wrap { display: flex; flex-direction: column; height: 100%; min-height: 0; background: #fff; }
 .rt-title {
-  background: #20222a; color: #fff; font-size: 18px; font-weight: 700;
+  background: #fff; color: #1a1d23; font-size: 18px; font-weight: 700;
   padding: 10px 16px; display: flex; align-items: center; justify-content: center; flex: none; position: relative;
+  border-bottom: 1px solid #eceef1;
 }
 .rt-heading { text-align: center; }
-.rt-time { font-weight: 700; opacity: .9; font-size: 18px; }   /* 更新时间与标题同等加粗 */
+.rt-time { font-weight: 700; font-size: 18px; color: #303133; }   /* 更新时间与标题同等加粗 */
 .rt-actions { display: flex; align-items: center; gap: 12px; position: absolute; right: 16px; top: 50%; transform: translateY(-50%); }
-.rt-meta { font-size: 12px; font-weight: 400; opacity: .8; }
+.rt-meta { font-size: 12px; font-weight: 400; color: #8a929e; }
 .rt-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; }
 
 .rt-table { border-collapse: collapse; width: 100%; font-size: 12px; white-space: nowrap; }
